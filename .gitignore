@@ -1,0 +1,24 @@
+# Python virtual environment & packaging
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Generated media & local capture outputs
+demo_output/
+fta_exports/
+*.mp4
+*.mov
+*.mkv
+*.webm
+
+# macOS & IDE
+.DS_Store
+.vscode/
+.idea/

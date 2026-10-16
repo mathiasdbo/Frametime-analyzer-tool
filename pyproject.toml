@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frametime-analyzer"
+version = "0.1.0"
+description = "Professional Video Performance, Frametime, Tearing & Internal Render Resolution Analyzer for Elgato 4K S & UVC Capture Devices"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Mathias Debrun"}
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "scipy>=1.10.0",
+    "av>=11.0.0",
+    "imageio-ffmpeg>=0.4.9",
+    "Pillow>=10.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.7",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "httpx>=0.26.0",
+]
+
+[project.scripts]
+fta = "frametime_analyzer.cli.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"frametime_analyzer.ui" = ["static/**/*"]

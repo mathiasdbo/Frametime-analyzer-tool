@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OBS Transparent Live Frametime & Resolution Overlay</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "JetBrains Mono", -apple-system, BlinkMacSystemFont, monospace;
+    }
+    canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="obsCanvas" width="1920" height="1080"></canvas>
+  <script>
+    const canvas = document.getElementById('obsCanvas');
+    const ctx = canvas.getContext('2d');
+    const fpsHistory = [];
+    const ftHistory = [];
+    const tearHistory = [];
+    const MAX_FPS_SAMPLES = 240;
+    const MAX_FT_SAMPLES = 80;
+
+    function drawOverlay(m) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!m) return;
+
+      // Top-right HUD Card
+      const cx = 1920 - 450;
+      const cy = 36;
+      ctx.fillStyle = 'rgba(18, 22, 28, 0.76)';
+      ctx.strokeStyle = 'rgba(225, 230, 238, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.fillRect(cx, cy, 410, 175);
+      ctx.strokeRect(cx, cy, 410, 175);
+
+      ctx.fillStyle = m.rolling_fps >= 55 ? '#5de882' : (m.rolling_fps >= 45 ? '#ffb84d' : '#ff5252');
+      ctx.font = 'bold 54px monospace';
+      ctx.fillText(m.rolling_fps.toFixed(1), cx + 20, cy + 62);
+
+      ctx.fillStyle = '#b8c0cc';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText('FPS', cx + 165, cy + 62);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '16px monospace';
+      ctx.fillText(`1% LOW: ${m.fps_1_percent_low.toFixed(1)}`, cx + 235, cy + 36);
+      ctx.fillText(`FT: ${m.frametime_ms.toFixed(1)} ms`, cx + 235, cy + 62);
+
+      ctx.fillStyle = m.is_torn ? '#ff5252' : (m.is_duplicate ? '#ffb84d' : '#5de882');
+      ctx.font = 'bold 15px monospace';
+      ctx.fillText(
+        m.is_torn ? `TEARING DETECTED (Y=${(m.tear_line_y || [])[0] || 0}px)` : (m.is_duplicate ? 'FRAME REPEAT / DROP' : 'UNIQUE FRAME • V-SYNC CLEAN'),
+        cx + 20,
+        cy + 96
+      );
+
+      ctx.fillStyle = '#b8c0cc';
+      ctx.font = '15px monospace';
+      ctx.fillText(`TARGET OUTPUT: ${m.target_width}x${m.target_height}`, cx + 20, cy + 134);
+      ctx.fillStyle = '#50d2f0';
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText(`EST. RENDER:   ${m.render_width}x${m.render_height} (${m.resolution_tier_label})`, cx + 20, cy + 158);
+
+      // Bottom-left Frametime & FPS graphs
+      const gx = 36;
+      const ftY = 760;
+      const ftW = 360;
+      const ftH = 105;
+      ctx.fillStyle = 'rgba(18, 22, 28, 0.76)';
+      ctx.fillRect(gx, ftY, ftW, ftH);
+      ctx.strokeRect(gx, ftY, ftW, ftH);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 15px monospace';
+      ctx.fillText('FRAMETIME (MS)', gx + 6, ftY - 8);
+
+      if (ftHistory.length > 1) {
+        ctx.strokeStyle = '#5de882';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < ftHistory.length; i++) {
+          const x = gx + (i / MAX_FT_SAMPLES) * ftW;
+          const y = ftY + ftH - Math.min(1, ftHistory[i] / 50.0) * (ftH - 8) - 4;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+
+      const fpsY = 900;
+      const fpsW = 620;
+      const fpsH = 145;
+      ctx.fillStyle = 'rgba(18, 22, 28, 0.76)';
+      ctx.fillRect(gx, fpsY, fpsW, fpsH);
+      ctx.strokeRect(gx, fpsY, fpsW, fpsH);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('FRAME-RATE (FPS)', gx + fpsW - 155, fpsY - 8);
+
+      if (fpsHistory.length > 1) {
+        ctx.strokeStyle = '#5de882';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        for (let i = 0; i < fpsHistory.length; i++) {
+          const x = gx + (i / MAX_FPS_SAMPLES) * fpsW;
+          const y = fpsY + fpsH - Math.min(1, fpsHistory[i] / 60.0) * (fpsH - 12) - 6;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    function connectWs() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+      ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        fpsHistory.push(m.rolling_fps);
+        if (fpsHistory.length > MAX_FPS_SAMPLES) fpsHistory.shift();
+        ftHistory.push(m.frametime_ms);
+        if (ftHistory.length > MAX_FT_SAMPLES) ftHistory.shift();
+        tearHistory.push(m.is_torn);
+        if (tearHistory.length > MAX_FPS_SAMPLES) tearHistory.shift();
+        drawOverlay(m);
+      };
+      ws.onclose = () => setTimeout(connectWs, 1500);
+    }
+    connectWs();
+  </script>
+</body>
+</html>

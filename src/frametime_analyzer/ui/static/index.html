@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frametime & Resolution Analyzer Studio</title>
+  <style>
+    :root {
+      --bg-dark: #0b0e14;
+      --bg-panel: #131822;
+      --bg-card: #1a2130;
+      --border: #2a3448;
+      --emerald: #5de882;
+      --cyan: #50d2f0;
+      --amber: #ffb84d;
+      --red: #ff5252;
+      --text: #f0f4f8;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "Segoe UI", Roboto, monospace;
+      background: var(--bg-dark);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 0.5px;
+    }
+    .brand-badge {
+      background: rgba(93, 232, 130, 0.15);
+      color: var(--emerald);
+      border: 1px solid var(--emerald);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input[type="text"] {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      width: 280px;
+    }
+    button, select {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    button:hover { border-color: var(--emerald); color: var(--emerald); }
+    button.primary {
+      background: rgba(93, 232, 130, 0.16);
+      border-color: var(--emerald);
+      color: var(--emerald);
+      font-weight: 600;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 390px;
+      flex: 1;
+      min-height: 0;
+    }
+    .viewport-pane {
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 10px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .canvas-container {
+      position: relative;
+      flex: 1;
+      background: #06080c;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    #frameCanvas {
+      max-width: 100%;
+      max-height: 100%;
+      cursor: crosshair;
+      display: block;
+    }
+    .scrubber-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-panel);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    #frameSlider { flex: 1; accent-color: var(--emerald); }
+    .timeline-pane {
+      height: 145px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    #timelineCanvas {
+      width: 100%;
+      height: 110px;
+      cursor: pointer;
+    }
+    .inspector-pane {
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border);
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 11px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .metric-box {
+      background: rgba(0, 0, 0, 0.25);
+      padding: 7px 9px;
+      border-radius: 5px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .metric-label { font-size: 10px; color: var(--muted); }
+    .metric-val { font-size: 16px; font-weight: 700; margin-top: 2px; }
+    .emerald { color: var(--emerald); }
+    .cyan { color: var(--cyan); }
+    .amber { color: var(--amber); }
+    .red { color: var(--red); }
+    .formula-box {
+      font-size: 11px;
+      background: #0d111a;
+      border: 1px solid var(--border);
+      padding: 8px;
+      border-radius: 5px;
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+    #stepProfileCanvas {
+      width: 100%;
+      height: 75px;
+      background: #090c12;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      margin-top: 6px;
+    }
+    .edge-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 140px;
+      overflow-y: auto;
+      margin-top: 6px;
+    }
+    .edge-item {
+      font-size: 11px;
+      padding: 6px 8px;
+      background: #101520;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+    }
+    .edge-item:hover { border-color: var(--cyan); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>FRAMETIME & RESOLUTION STUDIO</span>
+      <span class="brand-badge">ELGATO 4K S READY</span>
+    </div>
+    <div class="toolbar">
+      <input type="text" id="videoPathInput" placeholder="/path/to/capture.mp4 (or click Demo)" />
+      <button onclick="loadVideoPath()">Load Video</button>
+      <button class="primary" onclick="loadDemoClip()">Load Synthetic Demo</button>
+      <select id="platformSelect" onchange="refreshFrameView()">
+        <option value="PS5">Platform: PS5</option>
+        <option value="PS5 Pro">Platform: PS5 Pro</option>
+        <option value="PS4">Platform: PS4</option>
+        <option value="PS2">Platform: PS2</option>
+        <option value="Xbox Series X">Platform: Xbox Series X</option>
+        <option value="Xbox Series S">Platform: Xbox Series S</option>
+        <option value="Switch">Platform: Nintendo Switch</option>
+        <option value="Switch 2">Platform: Switch 2</option>
+        <option value="Steam Deck">Platform: Steam Deck</option>
+        <option value="PC">Platform: PC</option>
+        <option value="Elgato">Platform: Elgato 4K S</option>
+      </select>
+      <select id="viewModeSelect" onchange="refreshFrameView()">
+        <option value="overlay">View: DF HUD Overlay</option>
+        <option value="raw">View: Raw Capture Frame (Pixel Count)</option>
+        <option value="diff">View: Luma Diff & Tear Heatmap</option>
+      </select>
+      <button onclick="autoDetectEdges()">Auto-Detect Edges</button>
+      <button class="primary" onclick="exportAll()">Export MP4 + Alpha + CSV</button>
+      <a href="/obs-overlay" target="_blank" style="color:var(--cyan);font-size:12px;text-decoration:none;padding:4px 8px;border:1px solid var(--cyan);border-radius:4px;">OBS Overlay ↗</a>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <div class="viewport-pane">
+      <div class="canvas-container">
+        <canvas id="frameCanvas"></canvas>
+      </div>
+      <div class="scrubber-bar">
+        <button onclick="stepFrame(-1)">◀ Prev</button>
+        <button onclick="togglePlay()" id="playBtn">▶ Play</button>
+        <button onclick="stepFrame(1)">Next ▶</button>
+        <input type="range" id="frameSlider" min="0" max="100" value="0" oninput="onSliderInput(this.value)" />
+        <span id="frameCounterLabel" style="font-size:12px;min-width:140px;text-align:right;">Frame 0 / 0</span>
+      </div>
+      <div class="timeline-pane">
+        <div class="timeline-header">
+          <span>TIMELINE TELEMETRY — Green: Rolling FPS | Cyan: Render Scale % | Amber: Frametime (ms) | Red Tick: Tear</span>
+          <span id="clipSummaryLabel">Loading telemetry...</span>
+        </div>
+        <canvas id="timelineCanvas"></canvas>
+      </div>
+    </div>
+
+    <div class="inspector-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>Frame Telemetry</span>
+          <span id="frameStatusBadge" class="emerald">UNIQUE</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-box">
+            <div class="metric-label">ROLLING FPS</div>
+            <div class="metric-val emerald" id="valFps">60.0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">FRAMETIME</div>
+            <div class="metric-val" id="valFrametime">16.7 ms</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">1% / 0.1% LOW</div>
+            <div class="metric-val" id="valLows">60.0 / 60.0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">LUMA DIFF / TEAR</div>
+            <div class="metric-val" id="valDiff">0.00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Automated DRS & Resolution</span>
+          <span id="valResConf" class="cyan">Conf: 95%</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-box">
+            <div class="metric-label">TARGET OUTPUT</div>
+            <div class="metric-val" id="valTargetRes">1920x1080</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">EST. INTERNAL RENDER</div>
+            <div class="metric-val cyan" id="valRenderRes">1920x1080</div>
+          </div>
+        </div>
+        <div class="formula-box" id="autoResDetails">
+          Scale: 100% (1080p) • ESF Width: 1.00 px
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Interactive Stair-Step Pixel Counter</span>
+          <span style="color:var(--emerald);font-size:10px;">Drag across any edge on canvas</span>
+        </div>
+        <div class="formula-box" id="stairStepFormula">
+          Drag a line along a diagonal edge on the frame (or click "Auto-Detect Edges") to count stair-steps.
+        </div>
+        <canvas id="stepProfileCanvas"></canvas>
+        <div class="edge-list" id="edgeCandidatesList"></div>
+      </div>
+
+      <div class="card" id="exportResultCard" style="display:none;">
+        <div class="card-title"><span>Export Status</span></div>
+        <div class="formula-box" id="exportResultText"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let telemetry = [];
+    let summary = null;
+    let currentFrame = 0;
+    let playing = false;
+    let playTimer = null;
+    let currentImg = new Image();
+    let dragStart = null;
+    let dragEnd = null;
+    let isDragging = false;
+    let lastStairSample = null;
+
+    const frameCanvas = document.getElementById('frameCanvas');
+    const ctx = frameCanvas.getContext('2d');
+    const timelineCanvas = document.getElementById('timelineCanvas');
+    const tlCtx = timelineCanvas.getContext('2d');
+    const stepCanvas = document.getElementById('stepProfileCanvas');
+    const stepCtx = stepCanvas.getContext('2d');
+
+    async function fetchTelemetry() {
+      const res = await fetch('/api/telemetry');
+      const data = await res.json();
+      telemetry = data.frames || [];
+      summary = data.summary || null;
+      const slider = document.getElementById('frameSlider');
+      slider.max = Math.max(0, telemetry.length - 1);
+      if (summary) {
+        document.getElementById('clipSummaryLabel').textContent =
+          `Avg FPS: ${summary.avg_fps} | 1% Low: ${summary.fps_1_percent_low} | Torn: ${summary.torn_frames} (${summary.torn_frames_percent}%) | Render: ${summary.min_render_resolution[1]}p–${summary.max_render_resolution[1]}p`;
+      }
+      drawTimeline();
+      await selectFrame(0);
+    }
+
+    async function loadDemoClip() {
+      await fetch('/api/load', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({generate_demo: true})
+      });
+      await fetchTelemetry();
+    }
+
+    async function loadVideoPath() {
+      const path = document.getElementById('videoPathInput').value.trim();
+      if (!path) return loadDemoClip();
+      const res = await fetch('/api/load', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({video_path: path})
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || 'Failed to load video');
+        return;
+      }
+      await fetchTelemetry();
+    }
+
+    async function selectFrame(idx) {
+      if (!telemetry.length) return;
+      currentFrame = Math.max(0, Math.min(idx, telemetry.length - 1));
+      document.getElementById('frameSlider').value = currentFrame;
+      document.getElementById('frameCounterLabel').textContent =
+        `Frame ${currentFrame} / ${telemetry.length - 1}`;
+      updateInspector(telemetry[currentFrame]);
+      drawTimeline();
+      await refreshFrameView();
+    }
+
+    async function refreshFrameView() {
+      const mode = document.getElementById('viewModeSelect').value;
+      const platform = encodeURIComponent(document.getElementById('platformSelect').value);
+      currentImg.onload = () => {
+        frameCanvas.width = currentImg.naturalWidth;
+        frameCanvas.height = currentImg.naturalHeight;
+        renderCanvasOverlay();
+      };
+      currentImg.src = `/api/frame/${currentFrame}?mode=${mode}&platform=${platform}&t=${Date.now()}`;
+    }
+
+    function renderCanvasOverlay() {
+      ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
+      ctx.drawImage(currentImg, 0, 0);
+
+      if (dragStart && dragEnd) {
+        ctx.save();
+        ctx.strokeStyle = '#50d2f0';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(dragStart.x, dragStart.y);
+        ctx.lineTo(dragEnd.x, dragEnd.y);
+        ctx.stroke();
+
+        if (lastStairSample && lastStairSample.step_positions) {
+          const dx = dragEnd.x - dragStart.x;
+          const dy = dragEnd.y - dragStart.y;
+          const span = Math.max(1, lastStairSample.span_pixels);
+          ctx.fillStyle = '#5de882';
+          for (const stepIdx of lastStairSample.step_positions) {
+            const t = stepIdx / span;
+            const sx = dragStart.x + dx * t;
+            const sy = dragStart.y + dy * t;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+    }
+
+    function updateInspector(m) {
+      if (!m) return;
+      document.getElementById('valFps').textContent = m.rolling_fps.toFixed(1);
+      document.getElementById('valFrametime').textContent = `${m.frametime_ms.toFixed(1)} ms`;
+      document.getElementById('valLows').textContent = `${m.fps_1_percent_low.toFixed(1)} / ${m.fps_0_1_percent_low.toFixed(1)}`;
+      document.getElementById('valDiff').textContent = m.is_torn
+        ? `TEAR @ Y=${m.tear_line_y.join(',')}`
+        : `${m.mean_luma_diff.toFixed(2)}`;
+
+      const badge = document.getElementById('frameStatusBadge');
+      if (m.is_torn) {
+        badge.textContent = 'TORN FRAME';
+        badge.className = 'red';
+      } else if (m.is_duplicate) {
+        badge.textContent = 'DUPLICATE / DROP';
+        badge.className = 'amber';
+      } else {
+        badge.textContent = 'UNIQUE FRAME';
+        badge.className = 'emerald';
+      }
+
+      document.getElementById('valResConf').textContent = `Conf: ${Math.round(m.resolution_confidence * 100)}%`;
+      document.getElementById('valTargetRes').textContent = `${m.target_width}x${m.target_height}`;
+      document.getElementById('valRenderRes').textContent = `${m.render_width}x${m.render_height}`;
+      document.getElementById('autoResDetails').textContent =
+        `Tier: ${m.resolution_tier_label} (${m.render_scale_percent.toFixed(1)}%) • ESF FWHM: ${m.esf_fwhm_px} px`;
+    }
+
+    function drawTimeline() {
+      const rect = timelineCanvas.getBoundingClientRect();
+      timelineCanvas.width = rect.width || 800;
+      timelineCanvas.height = rect.height || 110;
+      const w = timelineCanvas.width;
+      const h = timelineCanvas.height;
+      tlCtx.clearRect(0, 0, w, h);
+
+      if (!telemetry.length) return;
+      const n = telemetry.length;
+      const maxFps = Math.max(60, summary ? summary.container_fps : 60);
+
+      // Grid lines
+      tlCtx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
+      tlCtx.beginPath();
+      tlCtx.moveTo(0, h * 0.5);
+      tlCtx.lineTo(w, h * 0.5);
+      tlCtx.stroke();
+
+      // Tear ticks
+      tlCtx.strokeStyle = 'rgba(255, 82, 82, 0.75)';
+      for (let i = 0; i < n; i++) {
+        if (telemetry[i].is_torn) {
+          const x = (i / Math.max(1, n - 1)) * w;
+          tlCtx.beginPath();
+          tlCtx.moveTo(x, 0);
+          tlCtx.lineTo(x, h);
+          tlCtx.stroke();
+        }
+      }
+
+      // Render scale % curve (Cyan)
+      tlCtx.strokeStyle = '#50d2f0';
+      tlCtx.lineWidth = 1.6;
+      tlCtx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const x = (i / Math.max(1, n - 1)) * w;
+        const y = h - (telemetry[i].render_scale_percent / 100.0) * (h - 14) - 7;
+        if (i === 0) tlCtx.moveTo(x, y);
+        else tlCtx.lineTo(x, y);
+      }
+      tlCtx.stroke();
+
+      // Rolling FPS curve (Emerald)
+      tlCtx.strokeStyle = '#5de882';
+      tlCtx.lineWidth = 2.0;
+      tlCtx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const x = (i / Math.max(1, n - 1)) * w;
+        const y = h - (Math.min(maxFps, telemetry[i].rolling_fps) / maxFps) * (h - 14) - 7;
+        if (i === 0) tlCtx.moveTo(x, y);
+        else tlCtx.lineTo(x, y);
+      }
+      tlCtx.stroke();
+
+      // Current frame playhead
+      const playX = (currentFrame / Math.max(1, n - 1)) * w;
+      tlCtx.strokeStyle = '#ffffff';
+      tlCtx.lineWidth = 1.5;
+      tlCtx.beginPath();
+      tlCtx.moveTo(playX, 0);
+      tlCtx.lineTo(playX, h);
+      tlCtx.stroke();
+    }
+
+    timelineCanvas.addEventListener('click', (e) => {
+      if (!telemetry.length) return;
+      const rect = timelineCanvas.getBoundingClientRect();
+      const ratio = (e.clientX - rect.left) / rect.width;
+      const idx = Math.round(ratio * (telemetry.length - 1));
+      selectFrame(idx);
+    });
+
+    function canvasCoords(e) {
+      const rect = frameCanvas.getBoundingClientRect();
+      const scaleX = frameCanvas.width / rect.width;
+      const scaleY = frameCanvas.height / rect.height;
+      return {
+        x: Math.round((e.clientX - rect.left) * scaleX),
+        y: Math.round((e.clientY - rect.top) * scaleY)
+      };
+    }
+
+    frameCanvas.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      dragStart = canvasCoords(e);
+      dragEnd = dragStart;
+      lastStairSample = null;
+      renderCanvasOverlay();
+    });
+
+    frameCanvas.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      dragEnd = canvasCoords(e);
+      renderCanvasOverlay();
+    });
+
+    frameCanvas.addEventListener('mouseup', async (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      dragEnd = canvasCoords(e);
+      if (Math.hypot(dragEnd.x - dragStart.x, dragEnd.y - dragStart.y) >= 8) {
+        await runPixelCount(dragStart.x, dragStart.y, dragEnd.x, dragEnd.y);
+      }
+    });
+
+    async function runPixelCount(x1, y1, x2, y2) {
+      const res = await fetch('/api/pixel-count', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({frame_index: currentFrame, x1, y1, x2, y2})
+      });
+      const sample = await res.json();
+      displayStairSample(sample);
+    }
+
+    function displayStairSample(sample) {
+      lastStairSample = sample;
+      dragStart = {x: sample.x1, y: sample.y1};
+      dragEnd = {x: sample.x2, y: sample.y2};
+      renderCanvasOverlay();
+
+      document.getElementById('stairStepFormula').innerHTML =
+        `<div><b>Span (${sample.dominant_axis}):</b> ${sample.span_pixels} px | <b>Counted Steps:</b> ${sample.counted_steps}</div>` +
+        `<div><b>Formula:</b> (${sample.counted_steps} / ${sample.span_pixels}) × ${sample.target_height}p = <span class="emerald"><b>${sample.estimated_render_width}x${sample.estimated_render_height} (${sample.standard_Tier_match})</b></span></div>`;
+
+      // Draw edge gradient profile
+      const rect = stepCanvas.getBoundingClientRect();
+      stepCanvas.width = rect.width || 340;
+      stepCanvas.height = rect.height || 75;
+      const sw = stepCanvas.width;
+      const sh = stepCanvas.height;
+      stepCtx.clearRect(0, 0, sw, sh);
+
+      const grads = sample.gradient_profile || [];
+      if (grads.length > 1) {
+        const maxG = Math.max(10, ...grads);
+        stepCtx.strokeStyle = '#50d2f0';
+        stepCtx.lineWidth = 1.5;
+        stepCtx.beginPath();
+        for (let i = 0; i < grads.length; i++) {
+          const x = (i / Math.max(1, grads.length - 1)) * sw;
+          const y = sh - (grads[i] / maxG) * (sh - 12) - 6;
+          if (i === 0) stepCtx.moveTo(x, y);
+          else stepCtx.lineTo(x, y);
+        }
+        stepCtx.stroke();
+
+        stepCtx.fillStyle = '#5de882';
+        for (const p of (sample.step_positions || [])) {
+          const x = (p / Math.max(1, grads.length - 1)) * sw;
+          const y = sh - ((grads[p] || 0) / maxG) * (sh - 12) - 6;
+          stepCtx.beginPath();
+          stepCtx.arc(x, y, 2.8, 0, Math.PI * 2);
+          stepCtx.fill();
+        }
+      }
+    }
+
+    async function autoDetectEdges() {
+      const res = await fetch(`/api/auto-edges/${currentFrame}`);
+      const data = await res.json();
+      const listEl = document.getElementById('edgeCandidatesList');
+      listEl.innerHTML = '';
+      const candidates = data.candidates || [];
+      if (!candidates.length) {
+        listEl.innerHTML = '<div style="font-size:11px;color:var(--muted);">No sharp diagonal edges found in this frame.</div>';
+        return;
+      }
+      candidates.forEach((c, idx) => {
+        const item = document.createElement('div');
+        item.className = 'edge-item';
+        item.innerHTML = `<span>Edge #${idx + 1} (${c.counted_steps}/${c.span_pixels} steps)</span><span class="emerald">${c.estimated_render_width}x${c.estimated_render_height} (${c.standard_Tier_match})</span>`;
+        item.onclick = () => displayStairSample(c);
+        listEl.appendChild(item);
+      });
+      displayStairSample(candidates[0]);
+    }
+
+    async function exportAll() {
+      const card = document.getElementById('exportResultCard');
+      const text = document.getElementById('exportResultText');
+      card.style.display = 'block';
+      text.textContent = 'Exporting VideoToolbox MP4, ProRes 4444 Alpha & CSV...';
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({export_burned_mp4: true, export_alpha_mov: true, export_csv: true})
+      });
+      const data = await res.json();
+      text.innerHTML = Object.entries(data.outputs || {})
+        .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+        .join('');
+    }
+
+    function stepFrame(delta) { selectFrame(currentFrame + delta); }
+    function onSliderInput(val) { selectFrame(parseInt(val, 10)); }
+    function togglePlay() {
+      playing = !playing;
+      document.getElementById('playBtn').textContent = playing ? '⏸ Pause' : '▶ Play';
+      if (playing) {
+        playTimer = setInterval(() => {
+          if (currentFrame >= telemetry.length - 1) selectFrame(0);
+          else selectFrame(currentFrame + 1);
+        }, 50);
+      } else {
+        clearInterval(playTimer);
+      }
+    }
+
+    window.addEventListener('resize', drawTimeline);
+    fetchTelemetry();
+  </script>
+</body>
+</html>
