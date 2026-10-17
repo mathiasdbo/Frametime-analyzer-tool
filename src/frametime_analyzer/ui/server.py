@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import tempfile
+import threading
 from typing import Any, Optional
 import cv2
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -46,9 +47,11 @@ class ExportRequest(BaseModel):
 
 
 class StudioState:
-    """Holds the currently loaded video, analyzed frame metrics, and live WebSocket clients."""
+    """Holds the currently loaded video, analyzed frame metrics, and background progressive analyzer."""
 
-    def __init__(self, initial_video: Optional[str] = None) -> None:
+    INITIAL_SYNC_FRAMES = 60
+
+    def __init__(self, initial_video: Optional[str] = None, max_frames: Optional[int] = None) -> None:
         self.config = AnalyzerConfig()
         self.pipeline = AnalysisPipeline(self.config)
         self.hud = HUDRenderer()
@@ -57,20 +60,93 @@ class StudioState:
         self.reader: Optional[VideoFileReader] = None
         self.metrics: list[FrameMetrics] = []
         self.summary: Optional[AnalysisSummary] = None
+        self.is_analyzing: bool = False
+        self.total_expected_frames: int = 0
+        self.max_frames: Optional[int] = max_frames
+        self._reader_lock = threading.Lock()
+        self._job_id = 0
         self._temp_dir = Path(tempfile.mkdtemp(prefix="fta_studio_"))
 
         if initial_video and Path(initial_video).exists():
             self.load_video(initial_video)
 
     def load_video(self, path: str) -> AnalysisSummary:
-        reader = VideoFileReader(path, analysis_width=self.config.analysis_width)
+        self._job_id += 1
+        current_job = self._job_id
+
+        with self._reader_lock:
+            if self.reader is not None:
+                self.reader.close()
+            self.reader = VideoFileReader(path, analysis_width=self.config.analysis_width, max_frames=self.max_frames)
+            total_est = self.reader.total_frames
+            if self.max_frames is not None and total_est > 0:
+                total_est = min(total_est, self.max_frames)
+            self.total_expected_frames = total_est
+
+        # Synchronously analyze the first INITIAL_SYNC_FRAMES so startup is instant (<0.3s)
+        sync_limit = self.INITIAL_SYNC_FRAMES
+        if self.max_frames is not None:
+            sync_limit = min(sync_limit, self.max_frames)
+
+        stream_reader = VideoFileReader(path, analysis_width=self.config.analysis_width, max_frames=self.max_frames)
         self.pipeline.reset()
         self.hud.reset()
-        self.metrics = self.pipeline.run_stream(reader)
-        self.summary = self.pipeline.build_summary(source_path=path, container_fps=reader.fps)
+        initial_metrics: list[FrameMetrics] = []
+        stream_iter = iter(stream_reader)
+        for _ in range(sync_limit):
+            try:
+                pkt = next(stream_iter)
+            except StopIteration:
+                break
+            initial_metrics.append(self.pipeline.process_packet(pkt))
+
+        self.metrics = initial_metrics
         self.video_path = path
-        self.reader = reader
+        self.summary = self.pipeline.build_summary(source_path=path, container_fps=stream_reader.fps)
+
+        # If more frames remain in the stream, continue analyzing progressively in a background thread
+        has_more = (self.max_frames is None or len(initial_metrics) < self.max_frames) and (
+            len(initial_metrics) == sync_limit
+        )
+        if has_more:
+            self.is_analyzing = True
+            worker = threading.Thread(
+                target=self._continue_analysis_worker,
+                args=(current_job, path, stream_reader, stream_iter),
+                daemon=True,
+            )
+            worker.start()
+        else:
+            self.is_analyzing = False
+            self.total_expected_frames = len(self.metrics)
+            stream_reader.close()
+
         return self.summary
+
+    def _continue_analysis_worker(
+        self,
+        job_id: int,
+        path: str,
+        stream_reader: VideoFileReader,
+        stream_iter: Any,
+    ) -> None:
+        try:
+            count_since_update = 0
+            for pkt in stream_iter:
+                if self._job_id != job_id:
+                    return
+                m = self.pipeline.process_packet(pkt)
+                self.metrics.append(m)
+                count_since_update += 1
+                if count_since_update >= 90:
+                    self.summary = self.pipeline.build_summary(source_path=path, container_fps=stream_reader.fps)
+                    count_since_update = 0
+            if self._job_id == job_id:
+                self.summary = self.pipeline.build_summary(source_path=path, container_fps=stream_reader.fps)
+                self.total_expected_frames = len(self.metrics)
+                self.is_analyzing = False
+        finally:
+            stream_reader.close()
 
     def load_or_create_demo(self) -> AnalysisSummary:
         demo_path = self._temp_dir / "elgato_synthetic_demo.mp4"
@@ -79,9 +155,9 @@ class StudioState:
         return self.load_video(str(demo_path))
 
 
-def create_app(initial_video: Optional[str] = None) -> FastAPI:
+def create_app(initial_video: Optional[str] = None, max_frames: Optional[int] = None) -> FastAPI:
     app = FastAPI(title="Frametime & Resolution Analyzer Studio", version="0.1.0")
-    state = StudioState(initial_video=initial_video)
+    state = StudioState(initial_video=initial_video, max_frames=max_frames)
     static_dir = Path(__file__).parent / "static"
 
     if static_dir.exists():
@@ -103,9 +179,15 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
             "loaded": state.video_path is not None,
             "video_path": state.video_path,
             "platform_name": state.platform_name,
+            "is_analyzing": state.is_analyzing,
+            "analyzed_frames": len(state.metrics),
+            "total_expected_frames": state.total_expected_frames,
             "summary": state.summary.to_dict() if state.summary else None,
-            "capture_devices": list_capture_devices(max_devices=3),
         }
+
+    @app.get("/api/devices")
+    def get_devices() -> dict[str, Any]:
+        return {"capture_devices": list_capture_devices(max_devices=3)}
 
     @app.post("/api/load")
     def load_video_endpoint(req: LoadVideoRequest) -> dict[str, Any]:
@@ -119,6 +201,8 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
             "video_path": state.video_path,
             "summary": summary.to_dict(),
             "total_frames": len(state.metrics),
+            "is_analyzing": state.is_analyzing,
+            "total_expected_frames": state.total_expected_frames,
         }
 
     @app.get("/api/telemetry")
@@ -126,6 +210,10 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
         if state.summary is None:
             state.load_or_create_demo()
         return {
+            "video_path": state.video_path,
+            "is_analyzing": state.is_analyzing,
+            "analyzed_frames": len(state.metrics),
+            "total_expected_frames": state.total_expected_frames,
             "summary": state.summary.to_dict() if state.summary else None,
             "frames": [m.to_dict() for m in state.metrics],
         }
@@ -142,7 +230,9 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
         state.platform_name = platform
 
         clamped = max(0, min(frame_index, len(state.metrics) - 1))
-        packet = state.reader.read_frame_at(clamped)
+        with state._reader_lock:
+            packet = state.reader.read_frame_at(clamped)
+            prev_packet = state.reader.read_frame_at(clamped - 1) if (mode == "diff" and clamped > 0) else None
         bgr = packet.raw_bgr
 
         if mode == "overlay":
@@ -156,8 +246,7 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
                 target_fps=state.reader.fps,
                 update=False,
             )
-        elif mode == "diff" and clamped > 0:
-            prev_packet = state.reader.read_frame_at(clamped - 1)
+        elif mode == "diff" and prev_packet is not None:
             diff_gray = cv2.absdiff(
                 cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY),
                 cv2.cvtColor(prev_packet.raw_bgr, cv2.COLOR_BGR2GRAY),
@@ -178,7 +267,8 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
         if state.reader is None or not state.metrics:
             state.load_or_create_demo()
         assert state.reader is not None
-        packet = state.reader.read_frame_at(req.frame_index)
+        with state._reader_lock:
+            packet = state.reader.read_frame_at(req.frame_index)
         sample = state.pipeline.resolution_analyzer.count_edge_stair_steps(
             packet.raw_bgr, req.x1, req.y1, req.x2, req.y2
         )
@@ -189,7 +279,8 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
         if state.reader is None or not state.metrics:
             state.load_or_create_demo()
         assert state.reader is not None
-        packet = state.reader.read_frame_at(frame_index)
+        with state._reader_lock:
+            packet = state.reader.read_frame_at(frame_index)
         candidates = state.pipeline.resolution_analyzer.auto_find_stair_step_candidates(
             packet.raw_bgr, max_candidates=6
         )
@@ -216,8 +307,10 @@ def create_app(initial_video: Optional[str] = None) -> FastAPI:
             outputs["json"] = str(json_path)
 
         if req.export_burned_mp4 or req.export_alpha_mov:
-            read_stream = VideoFileReader(state.video_path, analysis_width=state.config.analysis_width)
-            hud = HUDRenderer()
+            read_stream = VideoFileReader(
+                state.video_path, analysis_width=state.config.analysis_width, max_frames=len(state.metrics)
+            )
+            hud = HUDRenderer(platform_name=req.platform_name)
             burn_exp = (
                 VideoExporter(
                     out_dir / f"{stem}_analyzed.mp4",

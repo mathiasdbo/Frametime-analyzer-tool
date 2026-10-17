@@ -374,19 +374,38 @@
     const stepCanvas = document.getElementById('stepProfileCanvas');
     const stepCtx = stepCanvas.getContext('2d');
 
-    async function fetchTelemetry() {
+    let pollTimer = null;
+
+    async function fetchTelemetry(preserveSelection = false) {
       const res = await fetch('/api/telemetry');
       const data = await res.json();
       telemetry = data.frames || [];
       summary = data.summary || null;
+      if (data.video_path && !document.getElementById('videoPathInput').value) {
+        document.getElementById('videoPathInput').value = data.video_path;
+      }
       const slider = document.getElementById('frameSlider');
       slider.max = Math.max(0, telemetry.length - 1);
       if (summary) {
+        const progPrefix = data.is_analyzing
+          ? `[Analyzing ${data.analyzed_frames} / ${data.total_expected_frames || '?'} frames...] `
+          : '';
         document.getElementById('clipSummaryLabel').textContent =
-          `Avg FPS: ${summary.avg_fps} | 1% Low: ${summary.fps_1_percent_low} | Torn: ${summary.torn_frames} (${summary.torn_frames_percent}%) | Render: ${summary.min_render_resolution[1]}p–${summary.max_render_resolution[1]}p`;
+          `${progPrefix}Avg FPS: ${summary.avg_fps} | 1% Low: ${summary.fps_1_percent_low} | Torn: ${summary.torn_frames} (${summary.torn_frames_percent}%) | Render: ${summary.min_render_resolution[1]}p–${summary.max_render_resolution[1]}p`;
+      }
+      if (data.is_analyzing && !pollTimer) {
+        pollTimer = setInterval(() => fetchTelemetry(true), 1200);
+      } else if (!data.is_analyzing && pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
       }
       drawTimeline();
-      await selectFrame(0);
+      if (preserveSelection) {
+        document.getElementById('frameCounterLabel').textContent =
+          `Frame ${currentFrame} / ${ Math.max(0, telemetry.length - 1) }`;
+      } else {
+        await selectFrame(0);
+      }
     }
 
     async function loadDemoClip() {

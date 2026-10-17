@@ -243,11 +243,23 @@ def launch_studio(
     video_path: Optional[Path] = typer.Option(None, "--video", "-v", help="Optional initial video file to load"),
     host: str = typer.Option("127.0.0.1", "--host", help="Server host"),
     port: int = typer.Option(8000, "--port", "-p", help="Server port"),
+    max_frames: Optional[int] = typer.Option(None, "--max-frames", help="Optional limit on frames to analyze"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open Studio in default web browser"),
 ) -> None:
     """Launch the Interactive Web/Desktop Analyzer Studio and OBS Live Overlay server."""
-    console.print(f"[bold green]Launching Frametime & Resolution Studio at http://{host}:{port}[/bold green]")
-    console.print(f"[cyan]OBS Transparent Browser Source URL: http://{host}:{port}/obs-overlay[/cyan]")
-    fastapi_app = create_app(initial_video=str(video_path) if video_path else None)
+    import threading
+    import webbrowser
+
+    url = f"http://{host}:{port}"
+    console.print(f"[bold green]Launching Frametime & Resolution Studio at {url}[/bold green]")
+    console.print(f"[cyan]OBS Transparent Browser Source URL: {url}/obs-overlay[/cyan]")
+    if video_path:
+        console.print(
+            f"[dim]Preloading initial 60 frames of {video_path.name} (remaining frames will stream in background)...[/dim]"
+        )
+    fastapi_app = create_app(initial_video=str(video_path) if video_path else None, max_frames=max_frames)
+    if open_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
 
 

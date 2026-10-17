@@ -159,6 +159,9 @@ class VideoFileReader:
         finally:
             self.stop()
 
+    def close(self) -> None:
+        self.stop()
+
     def read_frame_at(self, frame_index: int) -> FramePacket:
         """Random-access read of a single frame for the interactive Studio UI."""
         cap = cv2.VideoCapture(self.path)
