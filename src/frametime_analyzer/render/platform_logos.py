@@ -26,11 +26,23 @@ PLATFORM_PRESETS: dict[str, dict[str, object]] = {
         "accent_bgra": (220, 100, 25, 255),
         "badge_bg": (85, 30, 10, 220),
     },
+    "ps3": {
+        "label": "PS3",
+        "family": "playstation",
+        "accent_bgra": (180, 60, 20, 255),
+        "badge_bg": (55, 22, 12, 220),
+    },
     "ps2": {
         "label": "PS2",
         "family": "playstation",
         "accent_bgra": (230, 140, 20, 255),
         "badge_bg": (70, 30, 10, 220),
+    },
+    "ps1": {
+        "label": "PS1",
+        "family": "playstation",
+        "accent_bgra": (175, 175, 180, 255),
+        "badge_bg": (55, 55, 62, 220),
     },
     "xbox series x": {
         "label": "XBOX SERIES X",
@@ -43,6 +55,24 @@ PLATFORM_PRESETS: dict[str, dict[str, object]] = {
         "family": "xbox",
         "accent_bgra": (75, 215, 55, 255),
         "badge_bg": (22, 75, 15, 220),
+    },
+    "xbox one": {
+        "label": "XBOX ONE",
+        "family": "xbox",
+        "accent_bgra": (40, 175, 20, 255),
+        "badge_bg": (16, 62, 10, 220),
+    },
+    "xbox 360": {
+        "label": "XBOX 360",
+        "family": "xbox",
+        "accent_bgra": (35, 225, 125, 255),  # Xbox 360 Lime Green in BGRA
+        "badge_bg": (15, 78, 35, 220),
+    },
+    "xbox": {
+        "label": "XBOX",
+        "family": "xbox",
+        "accent_bgra": (25, 205, 85, 255),  # Original Xbox Jewel Green in BGRA
+        "badge_bg": (12, 65, 22, 220),
     },
     "switch": {
         "label": "SWITCH",
