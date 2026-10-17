@@ -77,7 +77,7 @@ def analyze_video(
     max_frames: Optional[int] = typer.Option(None, "--max-frames", help="Optional limit on number of frames to process"),
     detect_tearing: bool = typer.Option(True, "--tearing/--no-tearing", help="Enable screen tearing detection"),
     detect_resolution: bool = typer.Option(True, "--resolution/--no-resolution", help="Enable target & internal render resolution estimation"),
-    platform_name: str = typer.Option("PS5", "--platform", "-p", help="Console/Platform badge (PS5, PS5 Pro, PS4, PS2, Xbox Series X, Xbox Series S, Switch, Switch 2, Steam Deck, PC, Elgato)"),
+    platform_name: str = typer.Option("PS5", "--platform", "-p", help="Console/Platform badge (PS5, PS5 Pro, PS4, PS3, PS2, PS1, Xbox Series X, Xbox Series S, Xbox One, Xbox 360, Xbox, Switch, Switch 2, Wii U, Wii, GameCube, N64, Steam Deck, PC, Elgato)"),
     custom_logo: Optional[Path] = typer.Option(None, "--logo", help="Optional custom PNG logo path for the HUD badge"),
 ) -> None:
     """Analyze a recorded video file and generate HUD overlays and telemetry."""

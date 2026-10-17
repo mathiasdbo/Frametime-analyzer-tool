@@ -66,3 +66,23 @@ def test_studio_api_endpoints(tmp_path: Path) -> None:
     pc_res = client.post("/api/pixel-count", json={"frame_index": 5, "x1": 100, "y1": 100, "x2": 180, "y2": 130})
     assert pc_res.status_code == 200
     assert "estimated_render_height" in pc_res.json()
+
+
+def test_platform_badges_rendering() -> None:
+    import numpy as np
+    from frametime_analyzer.render.platform_logos import draw_platform_badge, get_platform_preset
+
+    platforms = [
+        "PS5", "PS5 Pro", "PS4", "PS3", "PS2", "PS1",
+        "Xbox Series X", "Xbox Series S", "Xbox One", "Xbox 360", "Xbox",
+        "Switch", "Switch 2", "Wii U", "Wii", "GameCube", "N64",
+        "Steam Deck", "PC", "Elgato",
+    ]
+    for p in platforms:
+        preset = get_platform_preset(p)
+        assert preset["label"] == p.upper() or "ELGATO" in str(preset["label"])
+        canvas = np.zeros((120, 400, 4), dtype=np.uint8)
+        w = draw_platform_badge(canvas, 10, 10, 1.0, platform_name=p)
+        assert w > 40
+        assert int(canvas[:, :, 3].max()) == 255
+

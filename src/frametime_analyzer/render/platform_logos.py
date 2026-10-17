@@ -86,6 +86,30 @@ PLATFORM_PRESETS: dict[str, dict[str, object]] = {
         "accent_bgra": (55, 45, 245, 255),
         "badge_bg": (25, 18, 125, 220),
     },
+    "wii u": {
+        "label": "WII U",
+        "family": "wii_u",
+        "accent_bgra": (235, 165, 0, 255),  # Wii U Cerulean Cyan in BGRA
+        "badge_bg": (75, 48, 8, 220),
+    },
+    "wii": {
+        "label": "WII",
+        "family": "wii",
+        "accent_bgra": (230, 185, 55, 255),  # Wii Sky Cyan/Silver in BGRA
+        "badge_bg": (68, 52, 18, 220),
+    },
+    "gamecube": {
+        "label": "GAMECUBE",
+        "family": "gamecube",
+        "accent_bgra": (205, 80, 105, 255),  # GameCube Indigo Purple in BGRA
+        "badge_bg": (72, 26, 38, 220),
+    },
+    "n64": {
+        "label": "N64",
+        "family": "n64",
+        "accent_bgra": (205, 75, 25, 255),  # N64 Cobalt Blue in BGRA
+        "badge_bg": (62, 24, 12, 220),
+    },
     "steam deck": {
         "label": "STEAM DECK",
         "family": "steam",
@@ -106,13 +130,31 @@ PLATFORM_PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+PLATFORM_ALIASES: dict[str, str] = {
+    "nintendo 64": "n64",
+    "nintendo64": "n64",
+    "gcn": "gamecube",
+    "gc": "gamecube",
+    "nintendo gamecube": "gamecube",
+    "wiiu": "wii u",
+    "nintendo wii u": "wii u",
+    "nintendo wii": "wii",
+    "nintendo switch": "switch",
+    "nintendo switch 2": "switch 2",
+    "original xbox": "xbox",
+    "xbox og": "xbox",
+}
+
 
 def get_platform_preset(platform_name: str) -> dict[str, object]:
     """Resolve platform preset from user string (case-insensitive)."""
     key = (platform_name or "elgato").strip().lower()
+    if key in PLATFORM_ALIASES:
+        key = PLATFORM_ALIASES[key]
     if key in PLATFORM_PRESETS:
         return PLATFORM_PRESETS[key]
-    for k, preset in PLATFORM_PRESETS.items():
+    for k in sorted(PLATFORM_PRESETS.keys(), key=len, reverse=True):
+        preset = PLATFORM_PRESETS[k]
         if k in key or key in str(preset["label"]).lower():
             return preset
     return {
@@ -223,6 +265,87 @@ def draw_platform_badge(
             # Right Joy-Con (filled)
             cv2.rectangle(canvas, (cx + 1, cy - h_jc), (cx + w_half + 1, cy + h_jc), white, -1, cv2.LINE_AA)
             cv2.circle(canvas, (cx + w_half // 2 + 1, cy + h_jc // 4), max(1, int(round(2 * scale))), accent, -1, cv2.LINE_AA)
+        elif family == "n64":
+            # Draw N64 multicolored 3D 'N' emblem (Green pillars, Yellow accent, Red diagonal)
+            lw_p = max(2, int(round(3.0 * scale)))
+            dx = max(3, int(round(r * 0.68)))
+            dy = max(4, int(round(r * 0.82)))
+            n64_green = (55, 205, 45, 255)
+            n64_yellow = (25, 220, 255, 255)
+            n64_red = (45, 45, 240, 255)
+            # Back depth pillars in yellow
+            cv2.line(canvas, (cx - dx + 2, cy - dy - 1), (cx - dx + 2, cy + dy - 1), n64_yellow, max(1, lw_p - 1), cv2.LINE_AA)
+            cv2.line(canvas, (cx + dx + 2, cy - dy - 1), (cx + dx + 2, cy + dy - 1), n64_yellow, max(1, lw_p - 1), cv2.LINE_AA)
+            # Front left & right pillars in N64 green
+            cv2.line(canvas, (cx - dx, cy - dy), (cx - dx, cy + dy), n64_green, lw_p, cv2.LINE_AA)
+            cv2.line(canvas, (cx + dx, cy - dy), (cx + dx, cy + dy), n64_green, lw_p, cv2.LINE_AA)
+            # Diagonal crossbar in N64 red + white highlight
+            cv2.line(canvas, (cx - dx, cy - dy), (cx + dx, cy + dy), n64_red, lw_p, cv2.LINE_AA)
+            cv2.line(canvas, (cx - dx, cy - dy), (cx + dx, cy + dy), white, 1, cv2.LINE_AA)
+        elif family == "gamecube":
+            # Draw GameCube isometric hexagonal 'G' cube
+            lw = max(1, int(round(1.9 * scale)))
+            angles_deg = [-90, -30, 30, 90, 150, 210]
+            hex_pts = np.array(
+                [
+                    [
+                        int(round(cx + r * np.cos(np.deg2rad(a)))),
+                        int(round(cy + r * np.sin(np.deg2rad(a)))),
+                    ]
+                    for a in angles_deg
+                ],
+                dtype=np.int32,
+            )
+            # Draw outer hexagon in 5 segments (leaving 'G' opening on upper-right edge)
+            for idx in [1, 2, 3, 4, 5]:
+                p1 = tuple(hex_pts[idx])
+                p2 = tuple(hex_pts[(idx + 1) % 6])
+                cv2.line(canvas, p1, p2, white, lw, cv2.LINE_AA)
+            # Inner isometric cube + horizontal 'G' crossbar
+            r_in = max(2, int(round(r * 0.45)))
+            inner_pts = np.array(
+                [
+                    [
+                        int(round(cx + r_in * np.cos(np.deg2rad(a)))),
+                        int(round(cy + r_in * np.sin(np.deg2rad(a)))),
+                    ]
+                    for a in angles_deg
+                ],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(canvas, [inner_pts], white, cv2.LINE_AA)
+            cv2.line(canvas, (cx, cy), tuple(hex_pts[2]), white, lw, cv2.LINE_AA)
+        elif family == "wii":
+            # Draw Wii Remote vertical controller silhouette + twin 'ii' indicator dots
+            lw = max(1, int(round(1.6 * scale)))
+            w_rm = max(3, int(round(r * 0.48)))
+            h_rm = max(5, int(round(r * 0.92)))
+            rx0 = cx - int(round(r * 0.30))
+            cv2.rectangle(canvas, (rx0 - w_rm, cy - h_rm), (rx0 + w_rm, cy + h_rm), white, -1, cv2.LINE_AA)
+            # Plus D-pad & A-button in accent color on the white Wiimote body
+            d_sz = max(1, int(round(2.5 * scale)))
+            d_cy = cy - h_rm // 2
+            cv2.line(canvas, (rx0 - d_sz, d_cy), (rx0 + d_sz, d_cy), accent, lw, cv2.LINE_AA)
+            cv2.line(canvas, (rx0, d_cy - d_sz), (rx0, d_cy + d_sz), accent, lw, cv2.LINE_AA)
+            cv2.circle(canvas, (rx0, cy + int(round(2 * scale))), max(1, int(round(1.6 * scale))), accent, -1, cv2.LINE_AA)
+            # Stylized 'i' pillar beside the Wiimote
+            ix = cx + int(round(r * 0.55))
+            cv2.line(canvas, (ix, cy - int(round(r * 0.2))), (ix, cy + h_rm - 1), white, max(2, int(round(2.4 * scale))), cv2.LINE_AA)
+            cv2.circle(canvas, (ix, cy - int(round(r * 0.65))), max(1, int(round(1.8 * scale))), white, -1, cv2.LINE_AA)
+        elif family == "wii_u":
+            # Draw Wii U GamePad horizontal tablet + bold 'U' emblem
+            lw = max(1, int(round(1.8 * scale)))
+            w_gp = max(5, int(round(r * 0.95)))
+            h_gp = max(4, int(round(r * 0.68)))
+            cv2.rectangle(canvas, (cx - w_gp, cy - h_gp), (cx + w_gp, cy + h_gp), white, -1, cv2.LINE_AA)
+            # Inner screen cutout in accent color with white 'U' curve
+            w_sc = max(3, int(round(w_gp * 0.58)))
+            h_sc = max(2, int(round(h_gp * 0.66)))
+            cv2.rectangle(canvas, (cx - w_sc, cy - h_sc), (cx + w_sc, cy + h_sc), accent, -1, cv2.LINE_AA)
+            # Twin analog sticks on the GamePad bezels
+            stick_r = max(1, int(round(1.4 * scale)))
+            cv2.circle(canvas, (cx - int(round(w_gp * 0.78)), cy - int(round(h_gp * 0.3))), stick_r, accent, -1, cv2.LINE_AA)
+            cv2.circle(canvas, (cx + int(round(w_gp * 0.78)), cy - int(round(h_gp * 0.3))), stick_r, accent, -1, cv2.LINE_AA)
         elif family == "steam":
             # Draw Steam Deck ring + core dot
             lw = max(1, int(round(2.2 * scale)))

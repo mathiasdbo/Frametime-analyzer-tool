@@ -40,11 +40,13 @@ fta demo
 ### 2. Analyze an Elgato 4K S Recording
 ```bash
 fta analyze capture.mp4 \
+  --platform "PS5" \
   --output-video capture_analyzed.mp4 \
   --output-alpha capture_overlay_alpha.mov \
   --output-csv capture_telemetry.csv \
   --output-json capture_summary.json
 ```
+Supported `--platform` badges: `PS5`, `PS5 Pro`, `PS4`, `PS3`, `PS2`, `PS1`, `Xbox Series X`, `Xbox Series S`, `Xbox One`, `Xbox 360`, `Xbox`, `Switch`, `Switch 2`, `Wii U`, `Wii`, `GameCube`, `N64`, `Steam Deck`, `PC`, `Elgato` (or custom PNG via `--logo`).
 
 ### 3. Launch the Interactive Analyzer Studio & OBS Overlay Server
 ```bash
