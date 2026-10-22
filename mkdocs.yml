@@ -1,0 +1,97 @@
+site_name: Frametime Analyzer
+site_description: Frametime, screen tearing and internal render resolution analyzer for capture footage, with a customizable HUD.
+site_author: Mathias Debrun
+site_url: https://mathiasdbo.github.io/Frametime-analyzer-tool/
+repo_url: https://github.com/mathiasdbo/Frametime-analyzer-tool
+repo_name: mathiasdbo/Frametime-analyzer-tool
+edit_uri: edit/main/docs/
+copyright: MIT licensed &middot; Copyright &copy; 2026 Mathias Debrun
+
+theme:
+  name: material
+  icon:
+    logo: material/chart-timeline-variant
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.action.edit
+    - content.tabs.link
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: installation.md
+      - Quick start: quick-start.md
+  - User guide:
+      - Desktop app: gui.md
+      - HUD customization: hud-layout.md
+      - Resolution & DRS: resolution.md
+      - Outputs & telemetry: outputs.md
+      - Live capture, Studio & OBS: live-capture.md
+  - Reference:
+      - Command line: cli.md
+      - How the analysis works: how-it-works.md
+      - Platform notes: platforms.md
+      - Troubleshooting & FAQ: troubleshooting.md
+  - Project:
+      - Contributing: contributing.md
+      - Releasing: releasing.md
+      - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn

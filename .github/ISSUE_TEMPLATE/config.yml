@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://mathiasdbo.github.io/Frametime-analyzer-tool/
+    about: Installation, guides, command-line reference and troubleshooting.
+  - name: Report a security vulnerability
+    url: https://github.com/mathiasdbo/Frametime-analyzer-tool/security/advisories/new
+    about: Please report security issues privately.

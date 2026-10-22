@@ -124,8 +124,8 @@ def analyze_video(
     extra_info: Optional[list[str]] = typer.Option(None, "--info", help="Extra info line shown in the HUD info panel (repeatable)"),
     target_res: Optional[str] = typer.Option(None, "--target-res", help="Manual target output resolution, e.g. 3840x2160 (default: auto-detect)"),
     render_res: Optional[str] = typer.Option(None, "--render-res", help="Manual fixed internal render resolution, e.g. 2560x1440 (disables the DRS estimate)"),
-    hardware_encoder: bool = typer.Option(True, "--hw/--no-hw", help="Use a GPU H.264 encoder when available (VideoToolbox, NVENC, Quick Sync, AMF, VAAPI); falls back to libx264"),
     render_range: Optional[str] = typer.Option(None, "--render-range", help="Known DRS height window, e.g. 1440-2160: per-frame estimates are clamped to it"),
+    hardware_encoder: bool = typer.Option(True, "--hw/--no-hw", help="Use a GPU H.264 encoder when available (VideoToolbox, NVENC, Quick Sync, AMF, VAAPI); falls back to libx264"),
 ) -> None:
     """Analyze a recorded video file and generate HUD overlays and telemetry."""
     resolution_override = _build_resolution_override(target_res, render_res, render_range)

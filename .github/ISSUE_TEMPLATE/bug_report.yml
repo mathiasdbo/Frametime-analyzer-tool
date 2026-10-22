@@ -1,0 +1,63 @@
+name: Bug report
+description: Something doesn't work, crashes, or gives wrong results
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check the [troubleshooting page](https://mathiasdbo.github.io/Frametime-analyzer-tool/troubleshooting/) first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps or command to reproduce
+      description: The exact `fta` command, or the steps in the desktop app.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message / output
+      description: Paste the full error or terminal output.
+      render: text
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Downloaded app (GitHub Releases)
+        - pipx / uv
+        - From source
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `fta --version`
+      placeholder: fta 0.1.0
+  - type: textarea
+    id: capture
+    attributes:
+      label: Capture details
+      description: Capture device, game / platform, resolution and frame-rate, container (MP4 / MOV / MKV). A short sample clip helps a lot.

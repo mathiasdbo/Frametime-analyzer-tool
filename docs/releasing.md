@@ -1,6 +1,6 @@
 # Releasing Frametime Analyzer
 
-Releases are built by [`.github/workflows/release.yml`](../.github/workflows/release.yml). A version tag (`v*`) produces:
+Releases are built by [`.github/workflows/release.yml`](https://github.com/mathiasdbo/Frametime-analyzer-tool/blob/main/.github/workflows/release.yml). A version tag (`v*`) produces:
 
 | Artifact | Built on | For |
 |---|---|---|
@@ -13,7 +13,7 @@ Every standalone build is smoke-tested before upload: `fta --version`, a full `f
 
 ## Cutting a release
 
-1. Bump `__version__` in `src/frametime_analyzer/__init__.py` (the only place the version lives) and merge to `main`.
+1. Bump `__version__` in `src/frametime_analyzer/__init__.py` (the only place the version lives). In `CHANGELOG.md`, rename **Unreleased** to the version and date (e.g. `## [0.2.0] - 2026-11-01`), start a new empty **Unreleased** section, and update the links at the bottom. Merge to `main`.
 2. Tag the merge commit and push the tag:
    ```bash
    git checkout main && git pull

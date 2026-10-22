@@ -1,6 +1,15 @@
 # Frametime & Resolution Analyzer (`fta`)
 
+[![Tests](https://github.com/mathiasdbo/Frametime-analyzer-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/mathiasdbo/Frametime-analyzer-tool/actions/workflows/tests.yml)
+[![Docs](https://github.com/mathiasdbo/Frametime-analyzer-tool/actions/workflows/docs.yml/badge.svg)](https://mathiasdbo.github.io/Frametime-analyzer-tool/)
+[![Latest release](https://img.shields.io/github/v/release/mathiasdbo/Frametime-analyzer-tool?include_prereleases)](https://github.com/mathiasdbo/Frametime-analyzer-tool/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A studio-grade **Video Performance, Frametime, Screen Tearing, and Internal Render Resolution Analyzer** inspired by Digital Foundry's *FPSGui* and *TrDrop*, built for **Elgato 4K S** and UVC capture workflows.
+
+📖 **Documentation: <https://mathiasdbo.github.io/Frametime-analyzer-tool/>** (installation, desktop app guide, HUD layouts, command-line reference, troubleshooting).
+
+![Burned-in HUD on a capture](docs/assets/screenshots/hud-example.jpg)
 
 ## Key Features
 
@@ -21,7 +30,7 @@ A studio-grade **Video Performance, Frametime, Screen Tearing, and Internal Rend
 - **Desktop GUI (Windows / macOS / Linux)**:
   - `fta gui` opens a native Qt (PySide6) app as an alternative to the terminal: live HUD preview, drag-to-place elements, editable labels, platform badge & brand logo, extra info panel, and one-click processing with progress and cancel.
 - **Interactive Studio GUI & Live OBS Browser Source**:
-  - Launch `fta studio` to scrub frames, inspect Luma Diff & Tear heatmaps, measure pixel stair-steps, or add `http://127.0.0.1:8000/obs-overlay` as a transparent OBS Browser Source over your live **Elgato 4K S** feed.
+  - Launch `fta studio` to scrub frames, inspect frame-difference views, and measure pixel stair-steps. `http://127.0.0.1:8000/obs-overlay` is a transparent OBS Browser Source that plays back the loaded video's analysis.
 
 ---
 
@@ -149,7 +158,7 @@ Offsets are in 1080p reference pixels and scale with the video resolution, so on
 fta studio --video capture.mp4
 ```
 - Open **http://127.0.0.1:8000** for the interactive Frame & Pixel-Counting Studio.
-- Add **http://127.0.0.1:8000/obs-overlay** (`1920x1080`) as a **Browser Source** in OBS Studio for a transparent live overlay.
+- Add **http://127.0.0.1:8000/obs-overlay** (`1920x1080`) as a **Browser Source** in OBS Studio: a transparent HUD that plays back the analysis of the video loaded in the Studio (it does not measure the live OBS scene; use `fta live` for that).
 
 ### 5. Live Elgato 4K S / UVC Capture Analysis
 ```bash
@@ -161,12 +170,16 @@ fta live --device 0 --width 1920 --height 1080 --fps 60
 
 ## Releasing (maintainers)
 
-See [docs/RELEASING.md](docs/RELEASING.md). In short: bump `__version__` in `src/frametime_analyzer/__init__.py`, merge to `main`, then push a tag:
+See the [release guide](docs/releasing.md). In short: bump `__version__` in `src/frametime_analyzer/__init__.py`, merge to `main`, then push a tag:
 ```bash
 git tag v0.2.0
 git push origin v0.2.0
 ```
 GitHub Actions builds the Windows, macOS and Linux apps plus the Python packages, smoke-tests them, and publishes a GitHub Release (and PyPI, once enabled).
+
+## Contributing
+
+Bug reports, sample captures and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
