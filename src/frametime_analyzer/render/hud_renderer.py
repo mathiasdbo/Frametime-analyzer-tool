@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Optional
 import cv2
 import numpy as np
 
 from frametime_analyzer.models import FrameMetrics
 from frametime_analyzer.render.hud_layout import HUDLayout
-from frametime_analyzer.render.platform_logos import draw_platform_badge, measure_platform_badge
+from frametime_analyzer.render.platform_logos import (
+    draw_platform_badge,
+    measure_platform_badge,
+    read_image_unchanged,
+)
 
 _PlaceFn = Callable[[str, int, int], Optional[tuple[int, int]]]
 
@@ -486,7 +489,7 @@ class HUDRenderer:
         path = self.layout.brand_logo_path
         cached_path, cached_img = self._brand_logo_cache
         if path != cached_path:
-            img = cv2.imread(path, cv2.IMREAD_UNCHANGED) if path and Path(path).exists() else None
+            img = read_image_unchanged(path)
             if img is not None:
                 if img.ndim == 2:
                     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)

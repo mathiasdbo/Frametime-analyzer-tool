@@ -1,7 +1,6 @@
 """Vector and image-based Console & Platform Logo renderer for the HUD overlay."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 import cv2
 import numpy as np
@@ -146,6 +145,23 @@ PLATFORM_ALIASES: dict[str, str] = {
 }
 
 
+def read_image_unchanged(path: Optional[str]) -> Optional[np.ndarray]:
+    """Read an image (keeping alpha) from any path.
+
+    ``cv2.imread`` cannot open non-ASCII paths on Windows (e.g. ``C:\\Users\\José\\logo.png``), so the bytes are
+    read by Python and decoded by OpenCV instead.
+    """
+    if not path:
+        return None
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+
+
 def get_platform_preset(platform_name: str) -> dict[str, object]:
     """Resolve platform preset from user string (case-insensitive)."""
     key = (platform_name or "elgato").strip().lower()
@@ -224,8 +240,10 @@ def draw_platform_badge(
 
     # Optional custom PNG icon override
     drew_custom = False
-    if custom_logo_path and Path(custom_logo_path).exists():
-        logo_img = cv2.imread(custom_logo_path, cv2.IMREAD_UNCHANGED)
+    if custom_logo_path:
+        logo_img = read_image_unchanged(custom_logo_path)
+        if logo_img is not None and logo_img.ndim == 2:
+            logo_img = cv2.cvtColor(logo_img, cv2.COLOR_GRAY2BGR)
         if logo_img is not None:
             target_sz = max(8, icon_box - int(round(6 * scale)))
             resized = cv2.resize(logo_img, (target_sz, target_sz), interpolation=cv2.INTER_AREA)

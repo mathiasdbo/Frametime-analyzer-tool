@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from typing import Optional
 import cv2
 from rich.console import Console
@@ -27,6 +28,12 @@ from frametime_analyzer.render.hud_layout import HUDLayout
 from frametime_analyzer.render.hud_renderer import HUDRenderer
 from frametime_analyzer.render.video_exporter import VideoExporter
 from frametime_analyzer.ui.server import create_app
+
+if sys.platform == "win32":
+    # Legacy Windows code pages (e.g. cp1252 when output is piped) cannot encode symbols such as "✔"
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="replace")
 
 app = typer.Typer(
     name="fta",
@@ -102,6 +109,7 @@ def analyze_video(
     extra_info: Optional[list[str]] = typer.Option(None, "--info", help="Extra info line shown in the HUD info panel (repeatable)"),
     target_res: Optional[str] = typer.Option(None, "--target-res", help="Manual target output resolution, e.g. 3840x2160 (default: auto-detect)"),
     render_res: Optional[str] = typer.Option(None, "--render-res", help="Manual fixed internal render resolution, e.g. 2560x1440 (disables the DRS estimate)"),
+    hardware_encoder: bool = typer.Option(True, "--hw/--no-hw", help="Use a GPU H.264 encoder when available (VideoToolbox, NVENC, Quick Sync, AMF, VAAPI); falls back to libx264"),
     render_range: Optional[str] = typer.Option(None, "--render-range", help="Known DRS height window, e.g. 1440-2160: per-frame estimates are clamped to it"),
 ) -> None:
     """Analyze a recorded video file and generate HUD overlays and telemetry."""
@@ -125,6 +133,7 @@ def analyze_video(
         detect_resolution=detect_resolution,
         layout=layout,
         resolution_override=resolution_override,
+        use_hardware_encoder=hardware_encoder,
     )
 
     with Progress(
@@ -193,12 +202,13 @@ def run_demo(
         target_res=None,
         render_res=None,
         render_range=None,
+        hardware_encoder=True,
     )
 
 
 @app.command("devices")
 def list_devices() -> None:
-    """List connected UVC / AVFoundation video capture devices (e.g., Elgato 4K S)."""
+    """List connected UVC video capture devices (e.g., Elgato 4K S) on macOS, Windows or Linux."""
     devices = list_capture_devices(max_devices=5)
     if not devices:
         console.print("[yellow]No UVC capture devices detected.[/yellow]")

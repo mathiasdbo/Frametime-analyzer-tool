@@ -33,6 +33,7 @@ class ProcessingJob:
     max_frames: Optional[int] = None
     detect_tearing: bool = True
     detect_resolution: bool = True
+    use_hardware_encoder: bool = True  # GPU H.264 (VideoToolbox / NVENC / Quick Sync / AMF / VAAPI) when available
     layout: HUDLayout = field(default_factory=HUDLayout)
     resolution_override: Optional[ResolutionOverride] = None
 
@@ -78,6 +79,7 @@ def process_video(
                 fps=reader.fps,
                 alpha_only=False,
                 source_audio_path=job.video_path,
+                use_hardware_accel=job.use_hardware_encoder,
             )
         if job.output_alpha is not None:
             alpha_exporter = VideoExporter(

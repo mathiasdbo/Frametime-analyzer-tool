@@ -142,13 +142,15 @@ def test_gui_main_window_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     from frametime_analyzer.gui import app as gui_app
     from frametime_analyzer.gui.app import MainWindow
 
+    # Isolated settings file (on Windows the native QSettings backend is the registry)
+    ini_path = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(gui_app, "QSettings", lambda *_: QSettings(ini_path, QSettings.Format.IniFormat))
+
     # Never block on modal dialogs in tests
     for name in ("information", "warning", "critical"):
         monkeypatch.setattr(gui_app.QMessageBox, name, staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(gui_app.QMessageBox, "question", staticmethod(lambda *a, **k: gui_app.QMessageBox.StandardButton.Yes))
 
-    QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, str(tmp_path / "qsettings"))
-    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qsettings"))
     qapp = QApplication.instance() or QApplication([])
 
     clip = tmp_path / "gui_clip.mp4"

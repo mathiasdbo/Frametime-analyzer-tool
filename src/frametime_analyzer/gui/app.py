@@ -405,6 +405,10 @@ class MainWindow(QMainWindow):
         self.max_frames.setSpecialValueText("All frames")
         form.addRow(self.detect_tearing)
         form.addRow(self.detect_resolution)
+        self.hardware_encoder = QCheckBox("Use GPU video encoder when available (falls back to CPU / x264)")
+        self.hardware_encoder.setChecked(True)
+        self.hardware_encoder.setToolTip("VideoToolbox on macOS · NVENC, Quick Sync or AMF on Windows · NVENC, VAAPI or Quick Sync on Linux")
+        form.addRow(self.hardware_encoder)
         form.addRow("Frame limit", self.max_frames)
         col.addWidget(opts)
         col.addWidget(self._build_resolution_group())
@@ -873,6 +877,7 @@ class MainWindow(QMainWindow):
             max_frames=self.max_frames.value() or None,
             detect_tearing=self.detect_tearing.isChecked(),
             detect_resolution=self.detect_resolution.isChecked(),
+            use_hardware_encoder=self.hardware_encoder.isChecked(),
             layout=self.layout_model.copy(),
             resolution_override=self.resolution_override(),
         )

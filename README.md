@@ -15,7 +15,7 @@ A studio-grade **Video Performance, Frametime, Screen Tearing, and Internal Rend
   - **Automated Per-Frame DRS Estimator**: Combines normalized 1-pixel **Edge-Spread Function (ESF) Slope** ($\frac{|\nabla_{1\text{px}} I|}{\text{Contrast}_{7\times 7}(I)} \approx \frac{H_{\text{render}}}{H_{\text{target}}}$) with **Scale-Space Re-Upscaling Gradient Retention** to track Dynamic Resolution Scaling (DRS) frame-by-frame.
   - **Interactive Digital Foundry-Style Stair-Step Pixel Counter**: Drag across any diagonal edge in the Studio UI (or click **Auto-Detect Edges**) to count discrete aliasing stair-steps and compute the exact internal render resolution.
 - **Studio-Grade Video & Telemetry Exports**:
-  - **Burned-In Video (`.mp4`/`.mov`)**: Hardware-accelerated on macOS via Apple Silicon `h264_videotoolbox` with audio passthrough.
+  - **Burned-In Video (`.mp4`/`.mov`)**: GPU-accelerated H.264 when available (VideoToolbox on macOS; NVENC, Quick Sync or AMF on Windows; NVENC, VAAPI or Quick Sync on Linux), automatic fallback to `libx264`, with audio passthrough.
   - **Transparent Alpha Overlay (`.mov` ProRes 4444 / `.webm` VP9)**: Drop directly onto an upper timeline track in DaVinci Resolve, Final Cut Pro, or Premiere Pro.
   - **CSV & JSON Telemetry**: Full per-frame metrics and aggregate clip summary.
 - **Desktop GUI (Windows / macOS / Linux)**:
@@ -27,16 +27,28 @@ A studio-grade **Video Performance, Frametime, Screen Tearing, and Internal Rend
 
 ## Quick Start
 
+Works on **Windows 10/11, macOS and Linux** with Python 3.9+. No separate FFmpeg install is needed: a bundled FFmpeg is used when none is on your `PATH`.
+
+**macOS / Linux**
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,gui]"
 ```
 
-For the desktop GUI, install the optional `gui` extra (PySide6, works on Windows, macOS and Linux):
-```bash
-pip install -e ".[gui]"
+**Windows (PowerShell)**
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev,gui]"
 ```
+
+The `gui` extra installs PySide6 for the desktop app (`fta gui`); leave it out for a CLI-only install.
+
+### Platform notes
+- **Video encoding**: the burned-in MP4 uses a GPU encoder when one actually works on the machine (VideoToolbox on macOS; NVIDIA NVENC, Intel Quick Sync or AMD AMF on Windows; NVENC, VAAPI or Quick Sync on Linux), otherwise CPU `libx264`. Disable with `--no-hw` (CLI) or the *Use GPU video encoder* checkbox (GUI), or force one with `FTA_VIDEO_ENCODER=libx264` / `h264_nvenc` / ….
+- **Live capture** (`fta live`, `fta devices`): uses AVFoundation on macOS, DirectShow (then Media Foundation) on Windows, and V4L2 on Linux. Close OBS / Elgato 4K Capture Utility first, since only one app can open the device. On Linux your user needs access to `/dev/video*` (usually the `video` group); on macOS and Windows allow camera access for your terminal in the privacy settings.
+- **Linux desktop GUI**: Qt needs a few system libraries that most desktops already have. On minimal installs: `sudo apt install libegl1 libxkbcommon0 libxcb-cursor0 libfontconfig1`.
 
 ### 1. Run the Built-In Synthetic Elgato Demo
 Generates a synthetic capture clip containing 60 FPS, 30 FPS, frame stutters, screen tearing, and dynamic resolution scaling (100% -> 66.7% -> 50%), and exports the analyzed video, ProRes 4444 alpha overlay, CSV, and JSON:
