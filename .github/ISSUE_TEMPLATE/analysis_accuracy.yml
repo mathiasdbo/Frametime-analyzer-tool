@@ -1,0 +1,40 @@
+name: Wrong measurement
+description: FPS, frametime, tearing or resolution results look wrong for a capture
+labels: ["analysis"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the **render resolution** is wrong, you can set it manually: see [Resolution & DRS](https://mathiasdbo.github.io/Frametime-analyzer-tool/resolution/). Reports still help improve the automatic estimate.
+  - type: dropdown
+    id: metric
+    attributes:
+      label: Which measurement?
+      multiple: true
+      options:
+        - Frame-rate / repeated frames
+        - Frametime / stutter
+        - Screen tearing
+        - Target resolution
+        - Render resolution / DRS
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. measured
+      description: What should the result be (and how do you know), and what did the analyzer report?
+    validations:
+      required: true
+  - type: textarea
+    id: capture
+    attributes:
+      label: Capture
+      description: Game, platform, game mode / settings, capture device, resolution and frame-rate. Link a short sample clip if you can.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `fta --version`

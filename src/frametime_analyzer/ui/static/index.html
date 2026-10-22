@@ -697,7 +697,7 @@
       const card = document.getElementById('exportResultCard');
       const text = document.getElementById('exportResultText');
       card.style.display = 'block';
-      text.textContent = 'Exporting VideoToolbox MP4, ProRes 4444 Alpha & CSV...';
+      text.textContent = 'Exporting H.264 MP4, ProRes 4444 Alpha & CSV...';
       const res = await fetch('/api/export', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},

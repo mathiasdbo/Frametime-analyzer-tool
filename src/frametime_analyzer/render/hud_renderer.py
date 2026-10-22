@@ -2,37 +2,120 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Optional
+from dataclasses import dataclass
+from typing import Callable, Optional
 import cv2
 import numpy as np
 
 from frametime_analyzer.models import FrameMetrics
-from frametime_analyzer.render.platform_logos import draw_platform_badge
+from frametime_analyzer.render.hud_layout import HUDLayout
+from frametime_analyzer.render.platform_logos import (
+    draw_platform_badge,
+    measure_platform_badge,
+    read_image_unchanged,
+)
+
+_PlaceFn = Callable[[str, int, int], Optional[tuple[int, int]]]
+
+
+@dataclass(frozen=True)
+class _Palette:
+    """HUD colors in BGRA format."""
+
+    panel_bg: tuple[int, int, int, int] = (18, 22, 28, 185)
+    panel_border: tuple[int, int, int, int] = (220, 225, 230, 210)
+    emerald: tuple[int, int, int, int] = (130, 232, 93, 255)  # #5DE882 DF Green
+    cyan: tuple[int, int, int, int] = (240, 210, 80, 255)  # Cyan accent for DRS scale
+    amber: tuple[int, int, int, int] = (60, 185, 255, 255)  # Warning amber
+    red: tuple[int, int, int, int] = (80, 75, 255, 255)  # Drop / tear red
+    white: tuple[int, int, int, int] = (250, 250, 250, 255)
+    muted: tuple[int, int, int, int] = (185, 190, 198, 230)
+    grid: tuple[int, int, int, int] = (110, 120, 130, 140)
+
+
+
+_TEXT_REPLACEMENTS = {"\u2022": "-", "\u2013": "-", "\u2014": "-", "\u00d7": "x", "\u00b0": " deg"}
+
+
+def _ascii_text(text: str) -> str:
+    """OpenCV Hershey fonts only cover ASCII: map common symbols and replace the rest with '?'."""
+    for src, dst in _TEXT_REPLACEMENTS.items():
+        text = text.replace(src, dst)
+    return text.encode("ascii", "replace").decode("ascii")
 
 
 class HUDRenderer:
-    """Renders anti-aliased RGBA performance and resolution overlays at any resolution."""
+    """Renders anti-aliased RGBA performance and resolution overlays at any resolution.
+
+    Appearance (labels, logos, extra info text and element placement) is driven by a
+    :class:`~frametime_analyzer.render.hud_layout.HUDLayout`. The legacy keyword arguments
+    (``show_tear_lines``, ``show_resolution_badge``, ``platform_name``, ``custom_logo_path``)
+    override the corresponding layout fields when given.
+    """
 
     def __init__(
         self,
         fps_history_len: int = 240,
         frametime_history_len: int = 80,
-        show_tear_lines: bool = True,
-        show_resolution_badge: bool = True,
-        platform_name: str = "PS5",
+        show_tear_lines: Optional[bool] = None,
+        show_resolution_badge: Optional[bool] = None,
+        platform_name: Optional[str] = None,
         custom_logo_path: Optional[str] = None,
+        layout: Optional[HUDLayout] = None,
     ) -> None:
         self.fps_history_len = fps_history_len
         self.frametime_history_len = frametime_history_len
-        self.show_tear_lines = show_tear_lines
-        self.show_resolution_badge = show_resolution_badge
-        self.platform_name = platform_name
-        self.custom_logo_path = custom_logo_path
+        self.layout = layout.copy() if layout is not None else HUDLayout()
+        if show_tear_lines is not None:
+            self.layout.show_tear_lines = show_tear_lines
+        if show_resolution_badge is not None:
+            self.layout.show_resolution = show_resolution_badge
+        if platform_name is not None:
+            self.layout.platform_name = platform_name
+        if custom_logo_path is not None:
+            self.layout.custom_logo_path = custom_logo_path
+
+        # Pixel rectangles (x0, y0, x1, y1) of each element drawn in the last render, used by the GUI for hit-testing.
+        self.last_element_rects: dict[str, tuple[int, int, int, int]] = {}
+        self._brand_logo_cache: tuple[Optional[str], Optional[np.ndarray]] = (None, None)
 
         self._fps_history: deque[float] = deque(maxlen=fps_history_len)
         self._tear_history: deque[bool] = deque(maxlen=fps_history_len)
         self._ft_history: deque[float] = deque(maxlen=frametime_history_len)
         self._res_scale_history: deque[float] = deque(maxlen=fps_history_len)
+
+    # Backwards-compatible attribute access to the most common layout fields
+    @property
+    def platform_name(self) -> str:
+        return self.layout.platform_name
+
+    @platform_name.setter
+    def platform_name(self, value: str) -> None:
+        self.layout.platform_name = value
+
+    @property
+    def custom_logo_path(self) -> Optional[str]:
+        return self.layout.custom_logo_path
+
+    @custom_logo_path.setter
+    def custom_logo_path(self, value: Optional[str]) -> None:
+        self.layout.custom_logo_path = value
+
+    @property
+    def show_tear_lines(self) -> bool:
+        return self.layout.show_tear_lines
+
+    @show_tear_lines.setter
+    def show_tear_lines(self, value: bool) -> None:
+        self.layout.show_tear_lines = value
+
+    @property
+    def show_resolution_badge(self) -> bool:
+        return self.layout.show_resolution
+
+    @show_resolution_badge.setter
+    def show_resolution_badge(self, value: bool) -> None:
+        self.layout.show_resolution = value
 
     def reset(self) -> None:
         self._fps_history.clear()
@@ -46,6 +129,10 @@ class HUDRenderer:
         self._ft_history.append(metrics.frametime_ms)
         self._res_scale_history.append(metrics.render_scale_percent)
 
+    def scale_for_height(self, height: int) -> float:
+        """Pixel scale of 1080p reference units for a canvas of the given height (includes ``layout.hud_scale``)."""
+        return max(0.65, min(2.5, height / 1080.0)) * max(0.25, self.layout.hud_scale)
+
     def render_rgba_overlay(
         self,
         width: int,
@@ -58,51 +145,106 @@ class HUDRenderer:
         if update:
             self.update_history(metrics)
 
+        layout = self.layout
         overlay = np.zeros((height, width, 4), dtype=np.uint8)
-        scale = max(0.65, min(2.5, height / 1080.0))
+        scale = self.scale_for_height(height)
+        self.last_element_rects = {}
 
-        # Colors in BGRA format
-        col_emerald = (130, 232, 93, 255)      # #5DE882 DF Green
-        col_cyan = (240, 210, 80, 255)         # Cyan accent for DRS scale
-        col_amber = (60, 185, 255, 255)        # Warning amber
-        col_red = (80, 75, 255, 255)           # Drop / tear red
-        col_white = (250, 250, 250, 255)
-        col_muted = (185, 190, 198, 230)
-        col_grid = (110, 120, 130, 140)
-        col_panel_bg = (18, 22, 28, 185)
-        col_panel_border = (220, 225, 230, 210)
+        panel_alpha = int(round(255 * min(1.0, max(0.0, layout.panel_opacity))))
+        pal = _Palette(panel_bg=(18, 22, 28, panel_alpha))
+
+        def place(name: str, elem_w: int, elem_h: int) -> Optional[tuple[int, int]]:
+            placement = layout.element(name)
+            if not placement.visible or elem_w <= 0 or elem_h <= 0:
+                return None
+            x, y = placement.resolve(width, height, elem_w, elem_h, scale)
+            x = max(0, min(x, width - elem_w))
+            y = max(0, min(y, height - elem_h))
+            self.last_element_rects[name] = (x, y, min(width, x + elem_w), min(height, y + elem_h))
+            return x, y
+
+        # 1. Console / platform logo badge
+        if layout.platform_name or layout.custom_logo_path or layout.platform_label:
+            badge_w, badge_h = measure_platform_badge(scale, layout.platform_name, layout.platform_label or None)
+            pos = place("platform_badge", badge_w + 1, badge_h + 1)
+            if pos is not None:
+                draw_platform_badge(
+                    overlay,
+                    pos[0],
+                    pos[1],
+                    scale,
+                    platform_name=layout.platform_name,
+                    custom_logo_path=layout.custom_logo_path,
+                    label=layout.platform_label or None,
+                )
+
+        # 2. FPS & resolution card
+        card_w = int(round(410 * scale))
+        card_h = int(round((175 if layout.show_resolution else 115) * scale))
+        pos = place("stats_card", min(card_w, width), min(card_h, height))
+        if pos is not None:
+            self._draw_stats_card(overlay, pos[0], pos[1], card_w, card_h, metrics, target_fps, scale, pal)
+
+        # 3. Frametime step-graph & 4. rolling frame-rate graph (titles above, axis labels to the right)
+        title_h = int(round(26 * scale))
+        axis_w = int(round(55 * scale))
+        ft_w, ft_h = int(round(360 * scale)), int(round(105 * scale))
+        pos = place("frametime_graph", min(ft_w + axis_w, width), min(ft_h + title_h, height))
+        if pos is not None:
+            panel_w = min(ft_w, width - axis_w)
+            self._draw_frametime_graph(overlay, pos[0], pos[1] + title_h, panel_w, ft_h, target_fps, scale, pal)
+
+        fps_w, fps_h = int(round(620 * scale)), int(round(145 * scale))
+        pos = place("fps_graph", min(fps_w + axis_w, width), min(fps_h + title_h, height))
+        if pos is not None:
+            panel_w = min(fps_w, width - axis_w)
+            self._draw_fps_graph(overlay, pos[0], pos[1] + title_h, panel_w, fps_h, target_fps, scale, pal)
+
+        # 5. Free-form extra info panel (game title, settings, capture notes...)
+        self._draw_extra_info(overlay, scale, pal, place)
+
+        # 6. Brand / channel logo image
+        self._draw_brand_logo(overlay, scale, place)
+
+        # 7. Screen tear scanline indicator ticks (full-height edges, not part of the anchored layout)
+        if layout.show_tear_lines and metrics.is_torn:
+            tick_w = int(round(28 * scale))
+            for ty in metrics.tear_line_y:
+                if 0 <= ty < height:
+                    cv2.line(overlay, (0, ty), (tick_w, ty), pal.red, max(2, int(round(2.5 * scale))), cv2.LINE_AA)
+                    cv2.line(overlay, (width - tick_w, ty), (width - 1, ty), pal.red, max(2, int(round(2.5 * scale))), cv2.LINE_AA)
+
+        return overlay
+
+    # ------------------------------------------------------------------
+    # Element drawing
+    # ------------------------------------------------------------------
+    def _draw_stats_card(
+        self,
+        overlay: np.ndarray,
+        cx0: int,
+        cy0: int,
+        card_w: int,
+        card_h: int,
+        metrics: FrameMetrics,
+        target_fps: float,
+        scale: float,
+        pal: _Palette,
+    ) -> None:
+        labels = self.layout.labels
+        height, width = overlay.shape[:2]
+        cx1 = min(width - 1, cx0 + card_w)
+        cy1 = min(height - 1, cy0 + card_h)
 
         fps_ratio = metrics.rolling_fps / max(1.0, target_fps)
         if fps_ratio >= 0.92:
-            fps_color = col_emerald
+            fps_color = pal.emerald
         elif fps_ratio >= 0.75:
-            fps_color = col_amber
+            fps_color = pal.amber
         else:
-            fps_color = col_red
+            fps_color = pal.red
 
-        # ------------------------------------------------------------------
-        # 1. Top-Right Console/Platform Logo Badge + FPS & Resolution Card
-        # ------------------------------------------------------------------
-        card_w = int(round(410 * scale))
-        card_h = int(round((175 if self.show_resolution_badge else 115) * scale))
-        margin = int(round(36 * scale))
-        badge_h_space = int(round(42 * scale))
-        cx0 = max(10, width - card_w - margin)
-        cy0 = margin + badge_h_space
-        cx1 = min(width - 10, cx0 + card_w)
-        cy1 = min(height - 10, cy0 + card_h)
-
-        if self.platform_name:
-            draw_platform_badge(
-                overlay,
-                cx0,
-                margin,
-                scale,
-                platform_name=self.platform_name,
-                custom_logo_path=self.custom_logo_path,
-            )
-
-        self._draw_panel(overlay, cx0, cy0, cx1, cy1, col_panel_bg, col_panel_border, scale)
+        self._draw_panel(overlay, cx0, cy0, cx1, cy1, pal.panel_bg, pal.panel_border, scale)
 
         # Big FPS number
         fps_str = f"{metrics.rolling_fps:04.1f}" if metrics.rolling_fps < 99.5 else f"{int(round(metrics.rolling_fps))}"
@@ -116,42 +258,44 @@ class HUDRenderer:
         )
         self._draw_text(
             overlay,
-            "FPS",
+            labels.fps_unit,
             (cx0 + int(round(165 * scale)), cy0 + int(round(62 * scale))),
             font_scale=0.65 * scale,
-            color=col_muted,
+            color=pal.muted,
             thickness=max(1, int(round(1.5 * scale))),
         )
 
         # 1% Low & Frametime readout on right side of top card
         self._draw_text(
             overlay,
-            f"1% LOW: {metrics.fps_1_percent_low:04.1f}",
+            f"{labels.one_percent_low}: {metrics.fps_1_percent_low:04.1f}",
             (cx0 + int(round(235 * scale)), cy0 + int(round(36 * scale))),
             font_scale=0.50 * scale,
-            color=col_white,
+            color=pal.white,
             thickness=max(1, int(round(1.3 * scale))),
         )
         self._draw_text(
             overlay,
-            f"FT: {metrics.frametime_ms:04.1f} ms",
+            f"{labels.frametime_short}: {metrics.frametime_ms:04.1f} ms",
             (cx0 + int(round(235 * scale)), cy0 + int(round(64 * scale))),
             font_scale=0.50 * scale,
-            color=col_white,
+            color=pal.white,
             thickness=max(1, int(round(1.3 * scale))),
         )
 
         # Status badge (Duplicate / Tearing / V-Sync status)
         status_y = cy0 + int(round(95 * scale))
         if metrics.is_torn:
-            status_text = f"TEARING DETECTED (Y={metrics.tear_line_y[0]}px)" if metrics.tear_line_y else "TEARING DETECTED"
-            status_col = col_red
+            status_text = (
+                f"{labels.status_tearing} (Y={metrics.tear_line_y[0]}px)" if metrics.tear_line_y else labels.status_tearing
+            )
+            status_col = pal.red
         elif metrics.is_duplicate:
-            status_text = "FRAME REPEAT / DROP"
-            status_col = col_amber
+            status_text = labels.status_duplicate
+            status_col = pal.amber
         else:
-            status_text = "UNIQUE FRAME • V-SYNC CLEAN"
-            status_col = col_emerald
+            status_text = labels.status_clean
+            status_col = pal.emerald
 
         self._draw_text(
             overlay,
@@ -163,13 +307,13 @@ class HUDRenderer:
         )
 
         # Resolution & DRS section
-        if self.show_resolution_badge:
+        if self.layout.show_resolution:
             sep_y = cy0 + int(round(110 * scale))
             cv2.line(
                 overlay,
                 (cx0 + int(round(16 * scale)), sep_y),
                 (cx1 - int(round(16 * scale)), sep_y),
-                col_grid,
+                pal.grid,
                 max(1, int(round(1 * scale))),
                 cv2.LINE_AA,
             )
@@ -177,42 +321,40 @@ class HUDRenderer:
             rw, rh = metrics.estimated_render_resolution
             self._draw_text(
                 overlay,
-                f"TARGET OUTPUT: {tw}x{th} ({th}p)",
+                f"{labels.target_output}: {tw}x{th} ({th}p)",
                 (cx0 + int(round(20 * scale)), cy0 + int(round(134 * scale))),
                 font_scale=0.46 * scale,
-                color=col_muted,
+                color=pal.muted,
                 thickness=max(1, int(round(1.2 * scale))),
             )
             self._draw_text(
                 overlay,
-                f"EST. RENDER:   {rw}x{rh} ({metrics.resolution_tier_label} • {metrics.render_scale_percent:.0f}%)",
+                f"{labels.est_render}:   {rw}x{rh} ({metrics.resolution_tier_label} - {metrics.render_scale_percent:.0f}%)",
                 (cx0 + int(round(20 * scale)), cy0 + int(round(158 * scale))),
                 font_scale=0.48 * scale,
-                color=col_cyan,
+                color=pal.cyan,
                 thickness=max(1, int(round(1.4 * scale))),
             )
 
-        # ------------------------------------------------------------------
-        # 2. Frametime Step-Graph (Bottom-Left Above FPS Graph)
-        # ------------------------------------------------------------------
-        gx0 = margin
-        ft_w = int(round(360 * scale))
-        ft_h = int(round(105 * scale))
-        fps_h = int(round(145 * scale))
-        fps_w = int(round(620 * scale))
-
-        fps_y1 = height - margin
-        fps_y0 = max(10, fps_y1 - fps_h)
-        ft_y1 = max(10, fps_y0 - int(round(28 * scale)))
-        ft_y0 = max(10, ft_y1 - ft_h)
-
-        self._draw_panel(overlay, gx0, ft_y0, gx0 + ft_w, ft_y1, col_panel_bg, col_panel_border, scale)
+    def _draw_frametime_graph(
+        self,
+        overlay: np.ndarray,
+        gx0: int,
+        ft_y0: int,
+        ft_w: int,
+        ft_h: int,
+        target_fps: float,
+        scale: float,
+        pal: _Palette,
+    ) -> None:
+        ft_y1 = ft_y0 + ft_h
+        self._draw_panel(overlay, gx0, ft_y0, gx0 + ft_w, ft_y1, pal.panel_bg, pal.panel_border, scale)
         self._draw_text(
             overlay,
-            "FRAMETIME (MS)",
+            self.layout.labels.frametime_graph_title,
             (gx0 + int(round(8 * scale)), ft_y0 - int(round(8 * scale))),
             font_scale=0.48 * scale,
-            color=col_white,
+            color=pal.white,
             thickness=max(1, int(round(1.3 * scale))),
         )
 
@@ -221,13 +363,13 @@ class HUDRenderer:
         for ref_ms, label in [(16.67, "16.7"), (33.33, "33.3")]:
             ry = int(round(ft_y1 - (ref_ms / max_ft_ms) * ft_h))
             if ft_y0 < ry < ft_y1:
-                cv2.line(overlay, (gx0 + 2, ry), (gx0 + ft_w - 2, ry), col_grid, 1, cv2.LINE_AA)
+                cv2.line(overlay, (gx0 + 2, ry), (gx0 + ft_w - 2, ry), pal.grid, 1, cv2.LINE_AA)
                 self._draw_text(
                     overlay,
                     label,
                     (gx0 + ft_w + int(round(8 * scale)), ry + int(round(4 * scale))),
                     font_scale=0.42 * scale,
-                    color=col_white,
+                    color=pal.white,
                     thickness=max(1, int(round(1.1 * scale))),
                 )
 
@@ -243,46 +385,58 @@ class HUDRenderer:
                 y_prev = int(round(ft_y1 - (prev_val / max_ft_ms) * (ft_h - 6) - 3))
                 y_curr = int(round(ft_y1 - (curr_val / max_ft_ms) * (ft_h - 6) - 3))
 
-                seg_color = col_amber if curr_val > (1000.0 / target_fps) * 1.4 else col_emerald
+                seg_color = pal.amber if curr_val > (1000.0 / target_fps) * 1.4 else pal.emerald
                 cv2.line(overlay, (x_prev, y_prev), (x_curr, y_prev), seg_color, max(1, int(round(2 * scale))), cv2.LINE_AA)
                 cv2.line(overlay, (x_curr, y_prev), (x_curr, y_curr), seg_color, max(1, int(round(2 * scale))), cv2.LINE_AA)
 
-        # ------------------------------------------------------------------
-        # 3. Rolling Framerate Graph (Bottom-Left)
-        # ------------------------------------------------------------------
-        fps_x1 = min(width - int(round(60 * scale)), gx0 + fps_w)
-        actual_fps_w = max(50, fps_x1 - gx0)
-        self._draw_panel(overlay, gx0, fps_y0, fps_x1, fps_y1, col_panel_bg, col_panel_border, scale)
+    def _draw_fps_graph(
+        self,
+        overlay: np.ndarray,
+        gx0: int,
+        fps_y0: int,
+        fps_w: int,
+        fps_h: int,
+        target_fps: float,
+        scale: float,
+        pal: _Palette,
+    ) -> None:
+        fps_x1 = gx0 + fps_w
+        fps_y1 = fps_y0 + fps_h
+        self._draw_panel(overlay, gx0, fps_y0, fps_x1, fps_y1, pal.panel_bg, pal.panel_border, scale)
+        title = self.layout.labels.fps_graph_title
+        (title_w, _), _ = cv2.getTextSize(
+            _ascii_text(title), cv2.FONT_HERSHEY_DUPLEX, 0.48 * scale, max(1, int(round(1.3 * scale)))
+        )
         self._draw_text(
             overlay,
-            "FRAME-RATE (FPS)",
-            (fps_x1 - int(round(155 * scale)), fps_y0 - int(round(8 * scale))),
+            title,
+            (max(gx0, fps_x1 - title_w - int(round(20 * scale))), fps_y0 - int(round(8 * scale))),
             font_scale=0.48 * scale,
-            color=col_white,
+            color=pal.white,
             thickness=max(1, int(round(1.3 * scale))),
         )
 
-        # Midline and axis labels (e.g., 60, 40, 20 or 120, 60, 0)
+        # Midline and axis labels (e.g., 60, 40, 20 or 120, 80, 40)
         top_fps = max(60.0, target_fps)
         mid_fps = top_fps * (2.0 / 3.0)
         low_fps = top_fps * (1.0 / 3.0)
         for ref_val, ratio in [(top_fps, 0.08), (mid_fps, 0.50), (low_fps, 0.92)]:
             ry = int(round(fps_y0 + ratio * fps_h))
             if abs(ratio - 0.50) < 0.05:
-                cv2.line(overlay, (gx0 + 2, ry), (fps_x1 - 2, ry), col_grid, 1, cv2.LINE_AA)
+                cv2.line(overlay, (gx0 + 2, ry), (fps_x1 - 2, ry), pal.grid, 1, cv2.LINE_AA)
             self._draw_text(
                 overlay,
                 f"{int(round(ref_val))}",
                 (fps_x1 + int(round(8 * scale)), ry + int(round(4 * scale))),
                 font_scale=0.42 * scale,
-                color=col_white,
+                color=pal.white,
                 thickness=max(1, int(round(1.1 * scale))),
             )
 
         fps_list = list(self._fps_history)
         tear_list = list(self._tear_history)
         if len(fps_list) > 1:
-            dx_fps = actual_fps_w / float(max(1, self.fps_history_len - 1))
+            dx_fps = fps_w / float(max(1, self.fps_history_len - 1))
             pts: list[tuple[int, int]] = []
             for i, val in enumerate(fps_list):
                 clamped = min(top_fps, max(0.0, val))
@@ -292,22 +446,79 @@ class HUDRenderer:
                 pts.append((px, py))
 
                 if i < len(tear_list) and tear_list[i]:
-                    cv2.line(overlay, (px, fps_y0 + 2), (px, fps_y1 - 2), col_red, max(1, int(round(1.5 * scale))), cv2.LINE_AA)
+                    cv2.line(overlay, (px, fps_y0 + 2), (px, fps_y1 - 2), pal.red, max(1, int(round(1.5 * scale))), cv2.LINE_AA)
 
             for i in range(1, len(pts)):
-                cv2.line(overlay, pts[i - 1], pts[i], col_emerald, max(1, int(round(2.2 * scale))), cv2.LINE_AA)
+                cv2.line(overlay, pts[i - 1], pts[i], pal.emerald, max(1, int(round(2.2 * scale))), cv2.LINE_AA)
 
-        # ------------------------------------------------------------------
-        # 4. Screen Tear Scanline Indicator Ticks (if frame is torn)
-        # ------------------------------------------------------------------
-        if self.show_tear_lines and metrics.is_torn:
-            tick_w = int(round(28 * scale))
-            for ty in metrics.tear_line_y:
-                if 0 <= ty < height:
-                    cv2.line(overlay, (0, ty), (tick_w, ty), col_red, max(2, int(round(2.5 * scale))), cv2.LINE_AA)
-                    cv2.line(overlay, (width - tick_w, ty), (width - 1, ty), col_red, max(2, int(round(2.5 * scale))), cv2.LINE_AA)
+    def _draw_extra_info(self, overlay: np.ndarray, scale: float, pal: _Palette, place: _PlaceFn) -> None:
+        title = self.layout.extra_info_title.strip()
+        lines = [line for line in self.layout.extra_info_lines if line.strip()]
+        if not title and not lines:
+            return
 
-        return overlay
+        pad = int(round(16 * scale))
+        title_fs, line_fs = 0.62 * scale, 0.48 * scale
+        title_th, line_th = max(1, int(round(1.6 * scale))), max(1, int(round(1.2 * scale)))
+        title_lh, line_lh = int(round(34 * scale)), int(round(26 * scale))
+
+        text_w = 0
+        if title:
+            text_w = cv2.getTextSize(_ascii_text(title), cv2.FONT_HERSHEY_DUPLEX, title_fs, title_th)[0][0]
+        for line in lines:
+            text_w = max(text_w, cv2.getTextSize(_ascii_text(line), cv2.FONT_HERSHEY_DUPLEX, line_fs, line_th)[0][0])
+        box_w = text_w + pad * 2
+        box_h = pad * 2 + (title_lh if title else 0) + line_lh * len(lines) - int(round(8 * scale))
+
+        pos = place("extra_info", box_w, box_h)
+        if pos is None:
+            return
+        x0, y0 = pos
+        self._draw_panel(overlay, x0, y0, x0 + box_w - 1, y0 + box_h - 1, pal.panel_bg, pal.panel_border, scale)
+        y = y0 + pad
+        if title:
+            y += int(round(22 * scale))
+            self._draw_text(overlay, title, (x0 + pad, y), font_scale=title_fs, color=pal.emerald, thickness=title_th)
+            y += title_lh - int(round(22 * scale))
+        for line in lines:
+            y += int(round(18 * scale))
+            self._draw_text(overlay, line, (x0 + pad, y), font_scale=line_fs, color=pal.white, thickness=line_th)
+            y += line_lh - int(round(18 * scale))
+
+    def _load_brand_logo(self) -> Optional[np.ndarray]:
+        path = self.layout.brand_logo_path
+        cached_path, cached_img = self._brand_logo_cache
+        if path != cached_path:
+            img = read_image_unchanged(path)
+            if img is not None:
+                if img.ndim == 2:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+                elif img.shape[2] == 3:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+            self._brand_logo_cache = (path, img)
+            cached_img = img
+        return cached_img
+
+    def _draw_brand_logo(self, overlay: np.ndarray, scale: float, place: _PlaceFn) -> None:
+        logo = self._load_brand_logo()
+        if logo is None:
+            return
+        height, width = overlay.shape[:2]
+        target_h = max(4, min(height, int(round(self.layout.brand_logo_height * scale))))
+        target_w = max(4, min(width, int(round(logo.shape[1] * target_h / max(1, logo.shape[0])))))
+        pos = place("brand_logo", target_w, target_h)
+        if pos is None:
+            return
+        x0, y0 = pos
+        interp = cv2.INTER_AREA if target_h < logo.shape[0] else cv2.INTER_CUBIC
+        resized = cv2.resize(logo, (target_w, target_h), interpolation=interp).astype(np.float32)
+        src_a = resized[:, :, 3:4] / 255.0 * min(1.0, max(0.0, self.layout.brand_logo_opacity))
+        dst = overlay[y0 : y0 + target_h, x0 : x0 + target_w].astype(np.float32)
+        dst_a = dst[:, :, 3:4] / 255.0
+        out_a = src_a + dst_a * (1.0 - src_a)
+        out_rgb = (resized[:, :, :3] * src_a + dst[:, :, :3] * dst_a * (1.0 - src_a)) / np.maximum(out_a, 1e-6)
+        overlay[y0 : y0 + target_h, x0 : x0 + target_w, :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
+        overlay[y0 : y0 + target_h, x0 : x0 + target_w, 3] = np.clip(out_a[:, :, 0] * 255.0, 0, 255).astype(np.uint8)
 
     def composite_on_bgr(
         self,
@@ -362,6 +573,7 @@ class HUDRenderer:
         color: tuple[int, int, int, int],
         thickness: int,
     ) -> None:
+        text = _ascii_text(text)
         shadow_offset = max(1, int(round(font_scale * 2.0)))
         cv2.putText(
             canvas,

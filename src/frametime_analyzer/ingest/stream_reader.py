@@ -16,6 +16,32 @@ import numpy as np
 from frametime_analyzer.models import FramePacket
 
 
+def capture_backends(system: Optional[str] = None) -> list[int]:
+    """OpenCV capture APIs to try for UVC devices on this OS, most reliable first.
+
+    DirectShow exposes the Elgato 4K S modes (1080p60/120, 4K) on Windows far more reliably than Media
+    Foundation; Linux uses Video4Linux2; macOS uses AVFoundation. ``CAP_ANY`` is always the last resort.
+    """
+    system = system or platform.system()
+    if system == "Darwin":
+        preferred = [cv2.CAP_AVFOUNDATION]
+    elif system == "Windows":
+        preferred = [cv2.CAP_DSHOW, cv2.CAP_MSMF]
+    else:
+        preferred = [cv2.CAP_V4L2]
+    return [*preferred, cv2.CAP_ANY]
+
+
+def open_capture_device(device_index: int) -> Optional[cv2.VideoCapture]:
+    """Open a capture device with the first working backend for this OS (None if none works)."""
+    for backend in capture_backends():
+        cap = cv2.VideoCapture(device_index, backend)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return None
+
+
 def _make_luma_small(bgr: np.ndarray, target_width: int = 640) -> np.ndarray:
     """Convert BGR frame to downscaled grayscale luma for fast motion/tear analysis."""
     h, w = bgr.shape[:2]
@@ -186,7 +212,7 @@ class VideoFileReader:
 
 
 class LiveCaptureReader:
-    """Real-time UVC / AVFoundation stream reader for Elgato 4K S and capture devices."""
+    """Real-time UVC stream reader (AVFoundation / DirectShow / V4L2) for Elgato 4K S and capture devices."""
 
     def __init__(
         self,
@@ -202,15 +228,15 @@ class LiveCaptureReader:
         self.requested_fps = fps
         self.analysis_width = analysis_width
 
-        backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
-        self._cap = cv2.VideoCapture(self.device_index, backend)
-        if not self._cap.isOpened():
-            self._cap = cv2.VideoCapture(self.device_index)
-        if not self._cap.isOpened():
+        cap = open_capture_device(self.device_index)
+        if cap is None:
             raise RuntimeError(
                 f"Could not open capture device index {self.device_index}. "
-                "Verify Elgato 4K S or UVC capture card is connected and camera permissions are granted."
+                "Verify the Elgato 4K S / UVC capture card is connected, not in use by another app (OBS, Elgato "
+                "4K Capture Utility), and that camera access is allowed (macOS/Windows privacy settings; on Linux "
+                "your user needs access to /dev/video*, usually via the 'video' group)."
             )
+        self._cap = cap
 
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(width))
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(height))
@@ -288,12 +314,11 @@ class LiveCaptureReader:
 
 
 def list_capture_devices(max_devices: int = 5) -> list[dict[str, Union[int, str, float]]]:
-    """Probe connected UVC / AVFoundation capture devices (such as Elgato 4K S)."""
+    """Probe connected UVC capture devices (such as Elgato 4K S) on macOS, Windows and Linux."""
     devices: list[dict[str, Union[int, str, float]]] = []
-    backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
     for idx in range(max_devices):
-        cap = cv2.VideoCapture(idx, backend)
-        if cap.isOpened():
+        cap = open_capture_device(idx)
+        if cap is not None:
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = float(cap.get(cv2.CAP_PROP_FPS))
