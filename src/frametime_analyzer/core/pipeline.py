@@ -6,6 +6,7 @@ import numpy as np
 
 from frametime_analyzer.core.frametime_detector import FrametimeDetector
 from frametime_analyzer.core.resolution_analyzer import ResolutionAnalyzer
+from frametime_analyzer.core.resolution_override import ResolutionOverride
 from frametime_analyzer.core.tearing_detector import TearingDetector
 from frametime_analyzer.models import (
     AnalysisSummary,
@@ -18,8 +19,13 @@ from frametime_analyzer.models import (
 class AnalysisPipeline:
     """Orchestrates frame-by-frame analysis and produces FrameMetrics and AnalysisSummary."""
 
-    def __init__(self, config: Optional[AnalyzerConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AnalyzerConfig] = None,
+        resolution_override: Optional[ResolutionOverride] = None,
+    ) -> None:
         self.config = config or AnalyzerConfig()
+        self.resolution_override = resolution_override
         self.frametime_detector = FrametimeDetector(self.config)
         self.tearing_detector = TearingDetector(self.config)
         self.resolution_analyzer = ResolutionAnalyzer(self.config)
@@ -63,6 +69,8 @@ class AnalysisPipeline:
             esf_fwhm_px=float(res_info["esf_fwhm_px"]),
             spectral_cutoff_ratio=float(res_info["spectral_cutoff_ratio"]),
         )
+        if self.resolution_override is not None:
+            metrics = self.resolution_override.apply(metrics)
         self.metrics_history.append(metrics)
         return metrics
 

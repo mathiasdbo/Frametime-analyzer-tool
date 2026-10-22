@@ -7,6 +7,7 @@ from threading import Event
 from typing import Callable, Optional
 
 from frametime_analyzer.core.pipeline import AnalysisPipeline
+from frametime_analyzer.core.resolution_override import ResolutionOverride
 from frametime_analyzer.ingest.stream_reader import VideoFileReader
 from frametime_analyzer.models import AnalysisSummary, AnalyzerConfig, FrameMetrics
 from frametime_analyzer.render.hud_layout import HUDLayout
@@ -33,6 +34,7 @@ class ProcessingJob:
     detect_tearing: bool = True
     detect_resolution: bool = True
     layout: HUDLayout = field(default_factory=HUDLayout)
+    resolution_override: Optional[ResolutionOverride] = None
 
 
 @dataclass
@@ -54,10 +56,14 @@ def process_video(
         progress: Called as ``progress(frames_done, total_frames)`` after each frame.
         cancel_event: When set, processing stops after the current frame; outputs written so far are finalized.
     """
-    config = AnalyzerConfig(detect_tearing=job.detect_tearing, detect_resolution=job.detect_resolution)
-    pipeline = AnalysisPipeline(config)
+    override = job.resolution_override if job.resolution_override is not None and job.resolution_override.is_active else None
+    # Fully manual resolutions make the (expensive) automatic estimator unnecessary
+    fully_manual = override is not None and override.target is not None and override.render_mode == "fixed"
+    config = AnalyzerConfig(detect_tearing=job.detect_tearing, detect_resolution=job.detect_resolution and not fully_manual)
+    pipeline = AnalysisPipeline(config, resolution_override=override)
     reader = VideoFileReader(job.video_path, analysis_width=config.analysis_width, max_frames=job.max_frames)
-    hud = HUDRenderer(layout=job.layout, show_resolution_badge=job.layout.show_resolution and job.detect_resolution)
+    show_resolution = job.layout.show_resolution and (job.detect_resolution or override is not None)
+    hud = HUDRenderer(layout=job.layout, show_resolution_badge=show_resolution)
     total = max(1, reader.total_frames)
 
     burn_exporter: Optional[VideoExporter] = None

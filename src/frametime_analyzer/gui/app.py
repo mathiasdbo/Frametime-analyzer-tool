@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from frametime_analyzer.core.resolution_override import ResolutionOverride
 from frametime_analyzer.gui.preview import (
     PREVIEW_STATES,
     PreviewCanvas,
@@ -157,6 +158,49 @@ class OutputRow(QWidget):
 
     def path(self) -> Optional[Path]:
         return Path(self.picker.text()).expanduser() if self.check.isChecked() and self.picker.text() else None
+
+
+class ResolutionEdit(QWidget):
+    """Width x height spin boxes with a preset picker."""
+
+    changed = Signal()
+    PRESETS = ((1280, 720), (1600, 900), (1920, 1080), (2560, 1440), (3200, 1800), (3840, 2160))
+
+    def __init__(self, width: int = 1920, height: int = 1080) -> None:
+        super().__init__()
+        self.width_spin = QSpinBox()
+        self.height_spin = QSpinBox()
+        for spin, value in ((self.width_spin, width), (self.height_spin, height)):
+            spin.setRange(16, 16384)
+            spin.setValue(value)
+            spin.valueChanged.connect(self.changed)
+        self.preset = QComboBox()
+        self.preset.addItem("Preset…", None)
+        for w, h in self.PRESETS:
+            self.preset.addItem(f"{w}x{h} ({h}p)", (w, h))
+        self.preset.activated.connect(self._apply_preset)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.width_spin, 1)
+        row.addWidget(QLabel("×"))
+        row.addWidget(self.height_spin, 1)
+        row.addWidget(self.preset)
+
+    def _apply_preset(self, index: int) -> None:
+        value = self.preset.itemData(index)
+        if value is not None:
+            self.set_value(value)
+        self.preset.setCurrentIndex(0)
+
+    def value(self) -> tuple[int, int]:
+        return self.width_spin.value(), self.height_spin.value()
+
+    def set_value(self, value: tuple[int, int]) -> None:
+        self.width_spin.blockSignals(True)
+        self.width_spin.setValue(value[0])
+        self.width_spin.blockSignals(False)
+        self.height_spin.setValue(value[1])
+        self.changed.emit()
 
 
 class ElementEditor(QWidget):
@@ -363,8 +407,76 @@ class MainWindow(QMainWindow):
         form.addRow(self.detect_resolution)
         form.addRow("Frame limit", self.max_frames)
         col.addWidget(opts)
+        col.addWidget(self._build_resolution_group())
         col.addStretch(1)
         return tab
+
+    def _build_resolution_group(self) -> QGroupBox:
+        box = QGroupBox("Resolution (manual override)")
+        form = QFormLayout(box)
+
+        self.target_mode = QComboBox()
+        self.target_mode.addItem("Auto-detect (letterbox aware)", "auto")
+        self.target_mode.addItem("Manual", "manual")
+        self.target_edit = ResolutionEdit()
+        form.addRow("Target output", self.target_mode)
+        form.addRow("", self.target_edit)
+
+        self.render_mode = QComboBox()
+        self.render_mode.addItem("Auto – per-frame DRS estimate", "auto")
+        self.render_mode.addItem("Auto, clamped to a known DRS range", "range")
+        self.render_mode.addItem("Fixed – no DRS", "fixed")
+        self.render_edit = ResolutionEdit(1440, 810)
+        self.range_widget = QWidget()
+        range_row = QHBoxLayout(self.range_widget)
+        range_row.setContentsMargins(0, 0, 0, 0)
+        self.range_min = QSpinBox()
+        self.range_max = QSpinBox()
+        for spin, prefix, value in ((self.range_min, "Min ", 720), (self.range_max, "Max ", 1080)):
+            spin.setRange(16, 16384)
+            spin.setPrefix(prefix)
+            spin.setSuffix("p")
+            spin.setValue(value)
+            spin.valueChanged.connect(self._on_resolution_changed)
+            range_row.addWidget(spin, 1)
+        form.addRow("Internal render", self.render_mode)
+        form.addRow("", self.render_edit)
+        form.addRow("", self.range_widget)
+
+        hint = QLabel(
+            "Use this when the DRS estimate is wrong (TAA / upscalers, film grain, sharpening…). "
+            "Manual values are used for the HUD, CSV/JSON and the summary."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #9aa3ad;")
+        form.addRow(hint)
+
+        for combo in (self.target_mode, self.render_mode):
+            combo.currentIndexChanged.connect(self._on_resolution_changed)
+        for edit in (self.target_edit, self.render_edit):
+            edit.changed.connect(self._on_resolution_changed)
+        self._update_resolution_widgets()
+        return box
+
+    def _update_resolution_widgets(self) -> None:
+        self.target_edit.setVisible(self.target_mode.currentData() == "manual")
+        self.render_edit.setVisible(self.render_mode.currentData() == "fixed")
+        self.range_widget.setVisible(self.render_mode.currentData() == "range")
+
+    def _on_resolution_changed(self, *_: object) -> None:
+        self._update_resolution_widgets()
+        self._schedule_preview()
+
+    def resolution_override(self) -> Optional[ResolutionOverride]:
+        """The manual resolution settings, or None when everything is automatic."""
+        target = self.target_edit.value() if self.target_mode.currentData() == "manual" else None
+        mode = self.render_mode.currentData()
+        if mode == "fixed":
+            return ResolutionOverride(target=target, render_mode="fixed", render=self.render_edit.value())
+        if mode == "range":
+            lo, hi = sorted((self.range_min.value(), self.range_max.value()))
+            return ResolutionOverride(target=target, render_mode="range", render_min_height=lo, render_max_height=hi)
+        return ResolutionOverride(target=target) if target is not None else None
 
     def _build_platform_tab(self) -> QWidget:
         tab = QWidget()
@@ -613,7 +725,11 @@ class MainWindow(QMainWindow):
         h, w = bgr.shape[:2]
         self.preview_hud.layout = self.layout_model
         fps = self.frame_source.fps if self.frame_source.path else 60.0
-        metrics = preview_metrics(w, h, self.preview_state.currentText(), idx, target_fps=fps)
+        src_w, src_h = (self.frame_source.width, self.frame_source.height) if self.frame_source.path else (w, h)
+        metrics = preview_metrics(src_w, src_h, self.preview_state.currentText(), idx, target_fps=fps)
+        override = self.resolution_override()
+        if override is not None:
+            metrics = override.apply(metrics)
         composited = self.preview_hud.composite_on_bgr(bgr, metrics, target_fps=fps, update=False)
         self.canvas.set_frame(composited, self.preview_hud.last_element_rects)
         if self.frame_source.path:
@@ -678,12 +794,16 @@ class MainWindow(QMainWindow):
         self.out_json.picker.set_text(str(src.with_name(f"{src.stem}_summary.json")))
 
         bgr = self.frame_source.frame(0)
+        fs = self.frame_source
+        self.target_edit.set_value((fs.width, fs.height))
+        self.render_edit.set_value((int(round(fs.width * 0.75 / 2)) * 2, int(round(fs.height * 0.75 / 2)) * 2))
+        self.range_min.setValue(int(round(fs.height * 0.5)))
+        self.range_max.setValue(fs.height)
         self.frame_slider.blockSignals(True)
         self.frame_slider.setRange(0, self.frame_source.total_frames - 1)
         self.frame_slider.setValue(min(self.frame_source.total_frames - 1, self.frame_source.total_frames // 3))
         self.frame_slider.blockSignals(False)
         prime_preview_history(self.preview_hud, target_fps=max(30.0, self.frame_source.fps))
-        fs = self.frame_source
         duration = fs.total_frames / max(1.0, fs.fps)
         self.video_info.setText(
             f"{fs.width}x{fs.height} • {fs.fps:.2f} fps • {fs.total_frames} frames • {duration:.1f}s"
@@ -754,6 +874,7 @@ class MainWindow(QMainWindow):
             detect_tearing=self.detect_tearing.isChecked(),
             detect_resolution=self.detect_resolution.isChecked(),
             layout=self.layout_model.copy(),
+            resolution_override=self.resolution_override(),
         )
 
     def start_processing(self) -> None:

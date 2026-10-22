@@ -174,10 +174,21 @@ def test_gui_main_window_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert fps_graph.offset_x > 36 and fps_graph.offset_y > 36
     assert window.element_editors["fps_graph"].offset_x.value() == fps_graph.offset_x
 
+    # Manual resolution settings flow into the preview and the job
+    assert window.resolution_override() is None
+    window.target_mode.setCurrentIndex(1)
+    window.target_edit.set_value((1920, 1080))
+    window.render_mode.setCurrentIndex(window.render_mode.findData("fixed"))
+    window.render_edit.set_value((1280, 720))
+    window._render_preview()
+    override = window.resolution_override()
+    assert override is not None and override.target == (1920, 1080) and override.render == (1280, 720)
+
     # Run a full processing job through the worker thread
     window.out_alpha.check.setChecked(False)
     job = window._build_job()
     assert job is not None and job.layout.labels.fps_unit == "IPS"
+    assert job.resolution_override == override
     window.start_processing()
     worker = window._worker
     assert worker is not None

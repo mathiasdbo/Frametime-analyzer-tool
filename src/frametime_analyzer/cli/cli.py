@@ -11,6 +11,11 @@ import typer
 import uvicorn
 
 from frametime_analyzer.core.pipeline import AnalysisPipeline
+from frametime_analyzer.core.resolution_override import (
+    ResolutionOverride,
+    parse_height_range,
+    parse_resolution,
+)
 from frametime_analyzer.demo_generator import generate_demo_capture_video
 from frametime_analyzer.ingest.stream_reader import (
     LiveCaptureReader,
@@ -64,6 +69,23 @@ def _print_summary_table(summary: AnalysisSummary) -> None:
     console.print(table)
 
 
+def _build_resolution_override(
+    target_res: Optional[str], render_res: Optional[str], render_range: Optional[str]
+) -> Optional[ResolutionOverride]:
+    if render_res and render_range:
+        raise typer.BadParameter("Use either --render-res or --render-range, not both.")
+    try:
+        target = parse_resolution(target_res) if target_res else None
+        if render_res:
+            return ResolutionOverride(target=target, render_mode="fixed", render=parse_resolution(render_res))
+        if render_range:
+            lo, hi = parse_height_range(render_range)
+            return ResolutionOverride(target=target, render_mode="range", render_min_height=lo, render_max_height=hi)
+        return ResolutionOverride(target=target) if target else None
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 @app.command("analyze")
 def analyze_video(
     video_path: Path = typer.Argument(..., exists=True, help="Input gameplay capture video (MP4/MKV/MOV)"),
@@ -78,8 +100,12 @@ def analyze_video(
     custom_logo: Optional[Path] = typer.Option(None, "--logo", help="Optional custom PNG logo path for the HUD badge"),
     layout_path: Optional[Path] = typer.Option(None, "--layout", "-l", exists=True, help="HUD layout JSON (labels, logos, extra info & placement) saved from `fta gui`"),
     extra_info: Optional[list[str]] = typer.Option(None, "--info", help="Extra info line shown in the HUD info panel (repeatable)"),
+    target_res: Optional[str] = typer.Option(None, "--target-res", help="Manual target output resolution, e.g. 3840x2160 (default: auto-detect)"),
+    render_res: Optional[str] = typer.Option(None, "--render-res", help="Manual fixed internal render resolution, e.g. 2560x1440 (disables the DRS estimate)"),
+    render_range: Optional[str] = typer.Option(None, "--render-range", help="Known DRS height window, e.g. 1440-2160: per-frame estimates are clamped to it"),
 ) -> None:
     """Analyze a recorded video file and generate HUD overlays and telemetry."""
+    resolution_override = _build_resolution_override(target_res, render_res, render_range)
     layout = HUDLayout.load(layout_path) if layout_path else HUDLayout()
     if platform_name is not None:
         layout.platform_name = platform_name
@@ -98,6 +124,7 @@ def analyze_video(
         detect_tearing=detect_tearing,
         detect_resolution=detect_resolution,
         layout=layout,
+        resolution_override=resolution_override,
     )
 
     with Progress(
@@ -112,6 +139,8 @@ def analyze_video(
         result = process_video(job, progress=lambda done, total: progress.update(task_id, completed=done, total=total))
 
     _print_summary_table(result.summary)
+    if resolution_override is not None:
+        console.print("[yellow]Note: resolution values above use your manual --target-res / --render-res / --render-range settings.[/yellow]")
 
     if output_csv is not None:
         console.print(f"[green]✔ Saved CSV telemetry:[/green] {output_csv}")
@@ -161,6 +190,9 @@ def run_demo(
         custom_logo=None,
         layout_path=None,
         extra_info=None,
+        target_res=None,
+        render_res=None,
+        render_range=None,
     )
 
 
