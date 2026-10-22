@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 import json
+import os
 from pathlib import Path
 import sys
 from threading import Event
@@ -1019,6 +1020,9 @@ def run_gui(video_path: Optional[Path] = None, layout_path: Optional[Path] = Non
     _apply_dark_theme(app)  # type: ignore[arg-type]
     window = MainWindow(video_path=video_path, layout_path=layout_path)
     window.show()
+    if os.environ.get("FTA_GUI_SMOKE_TEST"):
+        # Used by the release workflow to check that a packaged app starts, then exits cleanly
+        QTimer.singleShot(1500, app.quit)
     return app.exec()
 
 

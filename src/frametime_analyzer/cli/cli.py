@@ -93,6 +93,21 @@ def _build_resolution_override(
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from frametime_analyzer import __version__
+
+        console.print(f"fta {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(False, "--version", callback=_version_callback, is_eager=True, help="Show the version and exit."),
+) -> None:
+    """Frametime, Tearing & Internal Render Resolution Analyzer for Elgato 4K S and capture footage."""
+
+
 @app.command("analyze")
 def analyze_video(
     video_path: Path = typer.Argument(..., exists=True, help="Input gameplay capture video (MP4/MKV/MOV)"),
