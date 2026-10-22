@@ -165,6 +165,16 @@ def get_platform_preset(platform_name: str) -> dict[str, object]:
     }
 
 
+def measure_platform_badge(scale: float, platform_name: str = "PS5", label: Optional[str] = None) -> tuple[int, int]:
+    """Return the (width, height) in pixels that :func:`draw_platform_badge` will occupy."""
+    label = label or str(get_platform_preset(platform_name)["label"])
+    icon_box = int(round(34 * scale))
+    thickness = max(1, int(round(1.5 * scale)))
+    (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, 0.50 * scale, thickness)
+    pad_x = int(round(12 * scale))
+    return icon_box + tw + pad_x * 2, int(round(34 * scale))
+
+
 def draw_platform_badge(
     canvas: np.ndarray,
     x0: int,
@@ -172,25 +182,28 @@ def draw_platform_badge(
     scale: float,
     platform_name: str = "PS5",
     custom_logo_path: Optional[str] = None,
+    label: Optional[str] = None,
 ) -> int:
     """Draw a vector console/platform logo emblem + label pill onto the BGRA canvas.
+
+    Args:
+        label: Optional text overriding the preset badge label (e.g. "PS5 PRO - 120HZ MODE").
 
     Returns:
         The width (in pixels) of the rendered platform badge.
     """
     preset = get_platform_preset(platform_name)
-    label = str(preset["label"])
+    label = label or str(preset["label"])
     family = str(preset["family"])
     accent: tuple[int, int, int, int] = preset["accent_bgra"]  # type: ignore[assignment]
     badge_bg: tuple[int, int, int, int] = preset["badge_bg"]  # type: ignore[assignment]
 
-    badge_h = int(round(34 * scale))
+    badge_w, badge_h = measure_platform_badge(scale, platform_name, label)
     icon_box = int(round(34 * scale))
     text_scale = 0.50 * scale
     thickness = max(1, int(round(1.5 * scale)))
-    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, text_scale, thickness)
+    (_, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, text_scale, thickness)
     pad_x = int(round(12 * scale))
-    badge_w = icon_box + tw + pad_x * 2
 
     h_can, w_can = canvas.shape[:2]
     x1 = min(w_can - 4, x0 + badge_w)

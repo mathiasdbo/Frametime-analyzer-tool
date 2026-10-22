@@ -1,6 +1,7 @@
 """Overlay HUD rendering and video/telemetry export utilities."""
 from __future__ import annotations
 
+from .hud_layout import ElementPlacement, HUDLabels, HUDLayout
 from .hud_renderer import HUDRenderer
 from .video_exporter import (
     VideoExporter,
@@ -10,6 +11,9 @@ from .video_exporter import (
 )
 
 __all__ = [
+    "ElementPlacement",
+    "HUDLabels",
+    "HUDLayout",
     "HUDRenderer",
     "VideoExporter",
     "export_telemetry_csv",

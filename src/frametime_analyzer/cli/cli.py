@@ -14,16 +14,13 @@ from frametime_analyzer.core.pipeline import AnalysisPipeline
 from frametime_analyzer.demo_generator import generate_demo_capture_video
 from frametime_analyzer.ingest.stream_reader import (
     LiveCaptureReader,
-    VideoFileReader,
     list_capture_devices,
 )
 from frametime_analyzer.models import AnalysisSummary, AnalyzerConfig
+from frametime_analyzer.processing import ProcessingJob, process_video
+from frametime_analyzer.render.hud_layout import HUDLayout
 from frametime_analyzer.render.hud_renderer import HUDRenderer
-from frametime_analyzer.render.video_exporter import (
-    VideoExporter,
-    export_summary_json,
-    export_telemetry_csv,
-)
+from frametime_analyzer.render.video_exporter import VideoExporter
 from frametime_analyzer.ui.server import create_app
 
 app = typer.Typer(
@@ -77,85 +74,67 @@ def analyze_video(
     max_frames: Optional[int] = typer.Option(None, "--max-frames", help="Optional limit on number of frames to process"),
     detect_tearing: bool = typer.Option(True, "--tearing/--no-tearing", help="Enable screen tearing detection"),
     detect_resolution: bool = typer.Option(True, "--resolution/--no-resolution", help="Enable target & internal render resolution estimation"),
-    platform_name: str = typer.Option("PS5", "--platform", "-p", help="Console/Platform badge (PS5, PS5 Pro, PS4, PS3, PS2, PS1, Xbox Series X, Xbox Series S, Xbox One, Xbox 360, Xbox, Switch, Switch 2, Wii U, Wii, GameCube, N64, Steam Deck, PC, Elgato)"),
+    platform_name: Optional[str] = typer.Option(None, "--platform", "-p", help="Console/Platform badge (PS5, PS5 Pro, PS4, PS3, PS2, PS1, Xbox Series X, Xbox Series S, Xbox One, Xbox 360, Xbox, Switch, Switch 2, Wii U, Wii, GameCube, N64, Steam Deck, PC, Elgato). Defaults to the layout's platform (PS5)."),
     custom_logo: Optional[Path] = typer.Option(None, "--logo", help="Optional custom PNG logo path for the HUD badge"),
+    layout_path: Optional[Path] = typer.Option(None, "--layout", "-l", exists=True, help="HUD layout JSON (labels, logos, extra info & placement) saved from `fta gui`"),
+    extra_info: Optional[list[str]] = typer.Option(None, "--info", help="Extra info line shown in the HUD info panel (repeatable)"),
 ) -> None:
     """Analyze a recorded video file and generate HUD overlays and telemetry."""
-    config = AnalyzerConfig(detect_tearing=detect_tearing, detect_resolution=detect_resolution)
-    pipeline = AnalysisPipeline(config)
-    reader = VideoFileReader(video_path, analysis_width=config.analysis_width, max_frames=max_frames)
-    hud = HUDRenderer(
-        show_resolution_badge=detect_resolution,
-        platform_name=platform_name,
-        custom_logo_path=str(custom_logo) if custom_logo else None,
+    layout = HUDLayout.load(layout_path) if layout_path else HUDLayout()
+    if platform_name is not None:
+        layout.platform_name = platform_name
+    if custom_logo is not None:
+        layout.custom_logo_path = str(custom_logo)
+    if extra_info:
+        layout.extra_info_lines = list(extra_info)
+
+    job = ProcessingJob(
+        video_path=video_path,
+        output_video=output_video,
+        output_alpha=output_alpha,
+        output_csv=output_csv,
+        output_json=output_json,
+        max_frames=max_frames,
+        detect_tearing=detect_tearing,
+        detect_resolution=detect_resolution,
+        layout=layout,
     )
 
-    burn_exporter: Optional[VideoExporter] = None
-    alpha_exporter: Optional[VideoExporter] = None
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total} frames"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task(f"Analyzing {video_path.name}...", total=None)
+        result = process_video(job, progress=lambda done, total: progress.update(task_id, completed=done, total=total))
 
-    if output_video is not None:
-        burn_exporter = VideoExporter(
-            output_video,
-            width=reader.width,
-            height=reader.height,
-            fps=reader.fps,
-            alpha_only=False,
-            source_audio_path=video_path,
-        )
-    if output_alpha is not None:
-        alpha_exporter = VideoExporter(
-            output_alpha,
-            width=reader.width,
-            height=reader.height,
-            fps=reader.fps,
-            alpha_only=True,
-        )
-
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("{task.completed}/{task.total} frames"),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            task_id = progress.add_task(f"Analyzing {video_path.name}...", total=max(1, reader.total_frames))
-
-            for packet in reader:
-                metrics = pipeline.process_packet(packet)
-                hud.update_history(metrics)
-
-                if burn_exporter is not None:
-                    composited = hud.composite_on_bgr(packet.raw_bgr, metrics, target_fps=reader.fps, update=False)
-                    burn_exporter.write_frame(composited)
-
-                if alpha_exporter is not None:
-                    rgba = hud.render_rgba_overlay(
-                        packet.width, packet.height, metrics, target_fps=reader.fps, update=False
-                    )
-                    alpha_exporter.write_frame(rgba)
-
-                progress.advance(task_id, 1)
-    finally:
-        if burn_exporter is not None:
-            burn_exporter.close()
-        if alpha_exporter is not None:
-            alpha_exporter.close()
-
-    summary = pipeline.build_summary(source_path=str(video_path), container_fps=reader.fps)
-    _print_summary_table(summary)
+    _print_summary_table(result.summary)
 
     if output_csv is not None:
-        export_telemetry_csv(pipeline.metrics_history, output_csv)
         console.print(f"[green]✔ Saved CSV telemetry:[/green] {output_csv}")
     if output_json is not None:
-        export_summary_json(summary, output_json, pipeline.metrics_history)
         console.print(f"[green]✔ Saved JSON summary:[/green] {output_json}")
     if output_video is not None:
         console.print(f"[green]✔ Saved burned-in overlay video:[/green] {output_video}")
     if output_alpha is not None:
         console.print(f"[green]✔ Saved transparent alpha overlay video:[/green] {output_alpha}")
+
+
+@app.command("gui")
+def launch_gui(
+    video_path: Optional[Path] = typer.Option(None, "--video", "-v", exists=True, help="Optional video file to open"),
+    layout_path: Optional[Path] = typer.Option(None, "--layout", "-l", exists=True, help="Optional HUD layout JSON to open"),
+) -> None:
+    """Launch the cross-platform desktop GUI (Qt) for HUD customization and video processing."""
+    try:
+        from frametime_analyzer.gui.app import run_gui
+    except ImportError as exc:
+        console.print(f"[red]The desktop GUI requires PySide6 ({exc}).[/red] Install it with: pip install -e \".[gui]\"")
+        raise typer.Exit(code=1) from exc
+    raise typer.Exit(code=run_gui(video_path=video_path, layout_path=layout_path))
 
 
 @app.command("demo")
@@ -180,6 +159,8 @@ def run_demo(
         detect_resolution=True,
         platform_name=platform_name,
         custom_logo=None,
+        layout_path=None,
+        extra_info=None,
     )
 
 
